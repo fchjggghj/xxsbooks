@@ -1,0 +1,13 @@
+{
+  "name": "gpt-adapt-runner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node run.mjs",
+    "dry-run": "node run.mjs --dry-run"
+  },
+  "dependencies": {
+    "playwright-core": "^1.48.0"
+  }
+}

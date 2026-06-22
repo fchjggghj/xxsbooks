@@ -1,0 +1,11 @@
+{"ts":"2026-06-19T07:34:04.296Z","type":"item_added","runId":"","phase":"idle","activeId":"","itemId":"item_mqkm4oi0_jhn7i2","title":"稳定性测试-稍后删除","chars":6}
+{"ts":"2026-06-19T07:34:04.301Z","type":"items_deleted","runId":"","phase":"idle","activeId":"","count":1}
+{"ts":"2026-06-19T11:18:00.536Z","type":"control_pause","runId":"","phase":"idle","activeId":""}
+{"ts":"2026-06-19T11:18:03.962Z","type":"control_stop","runId":"","phase":"idle","activeId":""}
+{"ts":"2026-06-19T11:33:59.351Z","type":"control_stop","runId":"","phase":"idle","activeId":""}
+{"ts":"2026-06-19T11:34:02.733Z","type":"control_pause","runId":"","phase":"idle","activeId":""}
+{"ts":"2026-06-19T11:37:34.457Z","type":"control_pause","runId":"","phase":"idle","activeId":""}
+{"ts":"2026-06-19T19:26:33.760Z","type":"item_added","runId":"","phase":"idle","activeId":"","itemId":"item_mqlbky73_ua9myn","title":"UI状态测试-稍后删除","chars":16}
+{"ts":"2026-06-19T19:26:33.765Z","type":"items_deleted","runId":"","phase":"idle","activeId":"","count":1}
+{"ts":"2026-06-19T19:26:55.909Z","type":"item_added","runId":"","phase":"idle","activeId":"","itemId":"item_mqlblfad_rhgbmr","title":"浏览器预排队显示测试-稍后删除","chars":21}
+{"ts":"2026-06-19T19:27:08.031Z","type":"items_deleted","runId":"","phase":"idle","activeId":"","count":1}

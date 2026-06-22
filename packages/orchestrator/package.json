@@ -1,0 +1,25 @@
+{
+  "name": "@novel-pipeline/orchestrator",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/index.ts",
+    "status": "tsx src/status.ts",
+    "pipeline": "tsx src/index.ts",
+    "pipeline:dry": "tsx src/index.ts --dry-run"
+  },
+  "dependencies": {
+    "@novel-pipeline/shared": "workspace:*",
+    "@novel-pipeline/runners": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
