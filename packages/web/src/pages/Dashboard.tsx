@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { useTaskState, useChromeState, useTasks } from '@/hooks/useApi';
+import { useTaskState, useTasks } from '@/hooks/useApi';
 import { useAppStore, TASK_LABELS } from '@/store/app';
 import { formatNum, secsHuman } from '@/lib/utils';
 import { cn } from '@/lib/utils';
@@ -23,21 +23,35 @@ interface StatCard {
 
 export function Dashboard() {
   const currentTask = useAppStore((s) => s.currentTask);
-  const { data: state } = useTaskState(currentTask);
-  const { data: chrome } = useChromeState();
+  const { data: state, isFetching } = useTaskState(currentTask);
   const { data: tasksData } = useTasks();
 
-  if (!state) {
-    return <div className="py-10 text-center text-muted">加载中…</div>;
+  // 校验数据归属：keepPreviousData 在切换任务时可能保留旧任务数据，
+  // 用后端返回的 taskId 校验，不匹配则视为加载中
+  const stateOk = state && state.taskId === currentTask;
+
+  // 用 useMemo 缓存计算结果，减少重渲染
+  const computed = React.useMemo(() => {
+    if (!stateOk) return null;
+    const t = state.totals;
+    const s = state.status;
+    const cfg = state.config;
+    const taskLabel = TASK_LABELS[currentTask] || currentTask;
+    const pctDone = t.selected ? (t.done / t.selected) * 100 : 0;
+    const pctFail = t.selected ? (t.failed / t.selected) * 100 : 0;
+    const eta = state.speed.avgSecPerChapter ? t.pending * state.speed.avgSecPerChapter : null;
+    return { t, s, cfg, taskLabel, pctDone, pctFail, eta };
+  }, [stateOk, state, currentTask]);
+
+  if (!stateOk || !computed) {
+    return (
+      <div className="py-10 text-center text-muted">
+        {isFetching ? '加载中…' : '暂无数据'}
+      </div>
+    );
   }
 
-  const t = state.totals;
-  const s = state.status;
-  const cfg = state.config;
-  const taskLabel = TASK_LABELS[currentTask] || currentTask;
-  const pctDone = t.selected ? (t.done / t.selected) * 100 : 0;
-  const pctFail = t.selected ? (t.failed / t.selected) * 100 : 0;
-  const eta = state.speed.avgSecPerChapter ? t.pending * state.speed.avgSecPerChapter : null;
+  const { t, s, cfg, taskLabel, pctDone, pctFail, eta } = computed;
 
   const cards: StatCard[] = [
     {
@@ -83,22 +97,11 @@ export function Dashboard() {
   const stages = cfg.pipelineStages || [];
 
   return (
-    <div className="space-y-5.5">
-      {/* Banner */}
+    <div className="space-y-5">
+      {/* 配额墙警告（保留：队列运行中仍可能触发） */}
       {s.rateLimited && (
-        <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3.5 py-2.75 text-amber-300">
-          ⚠ 最近日志疑似撞到账号配额墙，runner 会等待后自动重试。
-        </div>
-      )}
-      {chrome && !chrome.up && !s.rateLimited && (
-        <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3.5 py-2.75 text-amber-300">
-          ⚠ 调试 Chrome 未在线。点「启动执行浏览器」，首次需在该窗口完成目标页面登录。
-        </div>
-      )}
-      {!s.daemonAlive && !s.runnerAlive && !s.rateLimited && (
-        <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3.5 py-2.75 text-amber-300">
-          ⚠
-          后台跑批（{taskLabel}）当前没在运行。它通常开机会自动启动；若长时间没动静，重启一下电脑，或让我帮你启动。
+        <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.08] px-4 py-3 text-amber-300 backdrop-blur-sm">
+          ⚠ 最近日志疑似撞到账号配额墙，队列会等待后自动重试。
         </div>
       )}
 
@@ -107,13 +110,16 @@ export function Dashboard() {
         {cards.map((c) => (
           <Card
             key={c.label}
-            className="relative overflow-hidden transition-all hover:-translate-y-0.5 hover:border-white/[0.14]"
+            className="group relative overflow-hidden transition-all duration-300 hover:-translate-y-0.5 hover:border-white/[0.12]"
           >
-            <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-accent via-cyan-400 to-ok" />
+            <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-accent via-cyan-400 to-ok opacity-80" />
             <CardContent className="p-4">
               <div className="text-xs font-semibold text-dim">{c.label}</div>
               <div
-                className={cn('mt-1.5 text-[28px] font-bold leading-tight tracking-tight', c.cls)}
+                className={cn(
+                  'mt-1.5 text-[28px] font-bold leading-tight tracking-tight tabular-nums',
+                  c.cls,
+                )}
               >
                 {c.num}
               </div>
@@ -128,17 +134,17 @@ export function Dashboard() {
         <CardContent className="p-4">
           <div className="flex items-baseline justify-between">
             <div className="text-xs font-semibold text-dim">总进度（已完成 / 规则选中）</div>
-            <div className="text-xs text-muted">
+            <div className="text-xs text-muted tabular-nums">
               {formatNum(t.done)} / {formatNum(t.selected)}（{pctDone.toFixed(2)}%）
             </div>
           </div>
-          <div className="mt-3 flex h-3 overflow-hidden rounded-lg bg-surface-3 shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]">
+          <div className="mt-3 flex h-3 overflow-hidden rounded-lg bg-surface-3 shadow-[inset_0_1px_2px_rgba(0,0,0,0.45)]">
             <div
-              className="glow-bar h-full bg-gradient-to-r from-accent via-cyan-400 to-ok transition-all duration-300"
+              className="glow-bar h-full bg-gradient-to-r from-accent via-cyan-400 to-ok transition-all duration-500 ease-out"
               style={{ width: `${pctDone}%` }}
             />
             <div
-              className="h-full bg-gradient-to-r from-rose-500 to-fail transition-all duration-300"
+              className="h-full bg-gradient-to-r from-rose-500 to-fail transition-all duration-500 ease-out"
               style={{ width: `${pctFail}%` }}
             />
           </div>
@@ -163,7 +169,7 @@ export function Dashboard() {
                 href={cfg.gptUrl || '#'}
                 target="_blank"
                 rel="noreferrer"
-                className="text-accent-2 hover:underline"
+                className="text-accent-2 transition-colors hover:text-accent-3 hover:underline"
               >
                 {cfg.gptUrl || '(未设置)'}
               </a>
@@ -238,11 +244,11 @@ export function Dashboard() {
                     <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs">
                       <div>
                         <span className="text-muted">速度: </span>
-                        <span className="font-semibold">{speed}</span>
+                        <span className="font-semibold tabular-nums">{speed}</span>
                       </div>
                       <div>
                         <span className="text-muted">事件: </span>
-                        <span className="font-semibold">{t.eventCount}</span>
+                        <span className="font-semibold tabular-nums">{t.eventCount}</span>
                       </div>
                       <div>
                         <span className="text-muted">最后成功: </span>
@@ -250,9 +256,7 @@ export function Dashboard() {
                       </div>
                       <div>
                         <span className="text-muted">当前: </span>
-                        <span className="font-semibold truncate">
-                          {t.status.activeBook || '—'}
-                        </span>
+                        <span className="font-semibold truncate">{t.status.activeBook || '—'}</span>
                       </div>
                     </div>
                     {t.status.rateLimited && (
@@ -325,13 +329,14 @@ export function Dashboard() {
                   <YAxis stroke="#6c7693" fontSize={12} tickLine={false} axisLine={false} />
                   <RTooltip
                     contentStyle={{
-                      background: '#1a1e2a',
+                      background: '#161b27',
                       border: '1px solid #2a3142',
                       borderRadius: 12,
-                      color: '#e7eaf3',
+                      color: '#eef1f8',
+                      boxShadow: '0 16px 48px -16px rgba(0,0,0,0.8)',
                     }}
                   />
-                  <Bar dataKey="value" radius={[8, 8, 0, 0]}>
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]} animationDuration={500}>
                     {chartData.map((entry, idx) => (
                       <Cell key={idx} fill={entry.color} />
                     ))}

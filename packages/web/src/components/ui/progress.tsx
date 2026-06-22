@@ -18,14 +18,14 @@ const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
         aria-valuenow={value}
         aria-valuemax={max}
         className={cn(
-          'relative h-3 w-full overflow-hidden rounded-lg bg-surface-3 shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]',
+          'relative h-3 w-full overflow-hidden rounded-lg bg-surface-3 shadow-[inset_0_1px_2px_rgba(0,0,0,0.45)]',
           className,
         )}
         {...props}
       >
         <div
           className={cn(
-            'h-full rounded-lg bg-gradient-to-r from-accent via-cyan-400 to-emerald-400 transition-all duration-300',
+            'h-full rounded-lg bg-gradient-to-r from-accent via-cyan-400 to-emerald-400 transition-all duration-500 ease-out',
             glow && 'glow-bar',
             indicatorClassName,
           )}
@@ -48,16 +48,16 @@ const MiniBar = React.forwardRef<HTMLDivElement, MiniBarProps>(
     <span
       ref={ref}
       className={cn(
-        'inline-flex h-2 w-[122px] overflow-hidden rounded-lg bg-surface-3 align-middle',
+        'inline-flex h-2 w-[122px] overflow-hidden rounded-lg bg-surface-3 align-middle shadow-[inset_0_1px_1px_rgba(0,0,0,0.4)]',
         className,
       )}
     >
       <i
-        className="block h-full bg-gradient-to-r from-accent via-cyan-400 to-emerald-400"
+        className="block h-full bg-gradient-to-r from-accent via-cyan-400 to-emerald-400 transition-all duration-500"
         style={{ width: `${Math.min(100, donePct)}%` }}
       />
       <i
-        className="block h-full bg-gradient-to-r from-rose-500 to-fail"
+        className="block h-full bg-gradient-to-r from-rose-500 to-fail transition-all duration-500"
         style={{ width: `${Math.min(100, failPct)}%` }}
       />
     </span>

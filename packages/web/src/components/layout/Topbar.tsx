@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Play, Pause, PlayCircle, Square, Globe, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useQueueControl, useControl, useTasks } from '@/hooks/useApi';
+import { useQueueControl, useControl, useQueueHealth } from '@/hooks/useApi';
 import { useToast } from '@/hooks/useToast';
 import { useAppStore, ALL_TASKS, TASK_LABELS, type TaskId } from '@/store/app';
 import { cn } from '@/lib/utils';
@@ -21,9 +21,10 @@ export function Topbar() {
   const queueControl = useQueueControl();
   const control = useControl();
   const toast = useToast();
-  const { data: tasksData } = useTasks();
+  const { data: health } = useQueueHealth();
 
   const titleInfo = TAB_TITLES[tab] ?? TAB_TITLES.dash;
+  const queueRunning = health?.runtime?.running;
 
   const handleQueueControl = React.useCallback(
     (action: 'start' | 'pause' | 'resume' | 'stop') => {
@@ -55,43 +56,37 @@ export function Topbar() {
     );
   }, [control, toast]);
 
-  // 获取当前任务运行状态
-  const taskStatus = tasksData?.tasks.find((t) => t.taskId === currentTask);
-  const taskRunning = taskStatus?.status.runnerAlive;
-
   return (
-    <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-4.5 border-b border-white/[0.075] bg-bg/70 px-6 py-3.75 backdrop-blur-xl backdrop-saturate-150">
+    <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.06] bg-bg/70 px-6 py-3 backdrop-blur-2xl backdrop-saturate-150">
       <div className="flex items-center gap-4">
         <div className="min-w-[190px]">
-          <span className="block text-[11px] font-bold uppercase tracking-[1.4px] text-muted">
+          <span className="block text-[11px] font-bold uppercase tracking-[1.6px] text-muted">
             {titleInfo.eyebrow}
           </span>
-          <h2 className="m-0 mt-0.75 text-[19px] font-bold leading-tight tracking-tight">
+          <h2 className="m-0 mt-0.5 text-[18px] font-bold leading-tight tracking-tight">
             {titleInfo.title}
           </h2>
         </div>
 
         {/* 任务选择器（队列页不需要，因为队列是通用的） */}
         {tab !== 'queue' && (
-          <div className="flex items-center gap-1 rounded-xl border border-white/[0.075] bg-surface-2 p-1 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.7)]">
+          <div className="flex items-center gap-1 rounded-xl border border-white/[0.06] bg-surface-2/80 p-1 shadow-[0_8px_24px_-20px_rgba(0,0,0,0.7)] backdrop-blur-sm">
             {ALL_TASKS.map((tid: TaskId) => {
-              const ts = tasksData?.tasks.find((t) => t.taskId === tid);
-              const running = ts?.status.runnerAlive;
               const active = currentTask === tid;
               return (
                 <button
                   key={tid}
                   onClick={() => setCurrentTask(tid)}
                   className={cn(
-                    'relative flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-all',
+                    'relative flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-all duration-200',
                     active
-                      ? 'bg-accent/15 text-white'
-                      : 'text-dim hover:bg-surface-3 hover:text-txt',
+                      ? 'bg-accent/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+                      : 'text-dim hover:bg-surface-3/70 hover:text-txt',
                   )}
                 >
                   {TASK_LABELS[tid]}
-                  {running && (
-                    <span className="h-1.5 w-1.5 rounded-full bg-green-400 shadow-[0_0_0_3px_rgba(52,211,153,0.18)]" />
+                  {active && queueRunning && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-green-400 pulse-ring" />
                   )}
                 </button>
               );
@@ -100,8 +95,8 @@ export function Topbar() {
         )}
       </div>
 
-      <div className="flex flex-wrap justify-end gap-3">
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.075] bg-surface-2 px-2.25 py-1.75 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.7)]">
+      <div className="flex flex-wrap justify-end gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.06] bg-surface-2/80 px-2.5 py-1.5 shadow-[0_8px_24px_-20px_rgba(0,0,0,0.7)] backdrop-blur-sm">
           <span className="mx-1 text-[11px] font-bold uppercase tracking-wide text-muted">
             执行端
           </span>
@@ -115,9 +110,12 @@ export function Topbar() {
           </Button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.075] bg-surface-2 px-2.25 py-1.75 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.7)]">
-          <span className="mx-1 text-[11px] font-bold uppercase tracking-wide text-muted">
-            队列 {taskRunning ? '· 运行中' : ''}
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.06] bg-surface-2/80 px-2.5 py-1.5 shadow-[0_8px_24px_-20px_rgba(0,0,0,0.7)] backdrop-blur-sm">
+          <span className="mx-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">
+            队列
+            {queueRunning && (
+              <span className="h-1.5 w-1.5 rounded-full bg-green-400 pulse-ring" />
+            )}
           </span>
           <Button size="sm" variant="primary" onClick={() => handleQueueControl('start')}>
             <Play className="h-3.5 w-3.5" />

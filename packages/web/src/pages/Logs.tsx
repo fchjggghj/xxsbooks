@@ -15,10 +15,18 @@ const KIND_COLOR: Record<string, string> = {
   info: 'text-dim',
 };
 
-function LogLine({ time, kind, text }: { time: string; kind?: string; text: string }) {
+const LogLine = React.memo(function LogLine({
+  time,
+  kind,
+  text,
+}: {
+  time: string;
+  kind?: string;
+  text: string;
+}) {
   return (
-    <div className="flex gap-2.5 py-0.25">
-      <span className="flex-none text-[#566079]">{time}</span>
+    <div className="flex gap-2.5 py-0.25 hover:bg-white/[0.02]">
+      <span className="flex-none text-[#566079] tabular-nums">{time}</span>
       <span
         className={cn('whitespace-pre-wrap break-all', kind ? KIND_COLOR[kind] : 'text-[#cdd6e6]')}
       >
@@ -26,7 +34,7 @@ function LogLine({ time, kind, text }: { time: string; kind?: string; text: stri
       </span>
     </div>
   );
-}
+});
 
 function RunLogView({ events, taskLabel }: { events: LogEvent[]; taskLabel: string }) {
   const boxRef = React.useRef<HTMLDivElement>(null);
@@ -40,20 +48,21 @@ function RunLogView({ events, taskLabel }: { events: LogEvent[]; taskLabel: stri
 
   return (
     <Card>
-      <div className="flex items-center border-b border-white/[0.075] px-3.5 py-2.5">
+      <div className="flex items-center border-b border-white/[0.06] px-3.5 py-2.5">
         <strong className="text-[13px]">{taskLabel} 逐章日志 run.log</strong>
-        <label className="ml-auto flex items-center gap-1.5 text-xs text-muted">
+        <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-muted transition-colors hover:text-txt">
           <input
             type="checkbox"
             checked={autoscroll}
             onChange={(e) => setAutoscroll(e.target.checked)}
+            className="h-3.5 w-3.5 cursor-pointer rounded accent-accent"
           />
           自动滚动
         </label>
       </div>
       <div
         ref={boxRef}
-        className="max-h-[440px] overflow-auto rounded-b-2xl bg-[#0a0d15] p-3.5 font-mono-code text-xs leading-relaxed"
+        className="max-h-[440px] overflow-auto rounded-b-2xl bg-[#080b13] p-3.5 font-mono-code text-xs leading-relaxed"
       >
         {events.length === 0 ? (
           <div className="py-5 text-center text-muted">暂无</div>
@@ -88,12 +97,12 @@ function DaemonLogView({ lines }: { lines: DaemonLogLine[] }) {
 
   return (
     <Card>
-      <div className="border-b border-white/[0.075] px-3.5 py-2.5">
+      <div className="border-b border-white/[0.06] px-3.5 py-2.5">
         <strong className="text-[13px]">守护事件 daemon.log</strong>
       </div>
       <div
         ref={boxRef}
-        className="max-h-[440px] overflow-auto rounded-b-2xl bg-[#0a0d15] p-3.5 font-mono-code text-xs leading-relaxed"
+        className="max-h-[440px] overflow-auto rounded-b-2xl bg-[#080b13] p-3.5 font-mono-code text-xs leading-relaxed"
       >
         {lines.length === 0 ? (
           <div className="py-5 text-center text-muted">暂无</div>

@@ -98,6 +98,8 @@ export interface StateResponse {
   speed: SpeedInfo;
   scanAgeSec: number;
   config: AppConfig;
+  /** 后端返回的任务 ID（用于校验数据归属，防止切换任务时显示旧数据） */
+  taskId?: string;
 }
 
 export interface ChromeResponse {
@@ -302,11 +304,15 @@ export interface QueueItemResponse {
 }
 
 export interface HealthRuntime {
+  running?: boolean;
+  paused?: boolean;
+  message?: string;
+  processed?: number;
+  failed?: number;
   phase?: string;
   heartbeatAgeSec?: number | null;
   activeTitle?: string;
   succeeded?: number;
-  failed?: number;
   consecutiveFailures?: number;
   resumeAt?: string | null;
   autoPaused?: boolean;
@@ -326,6 +332,7 @@ export interface HealthChrome {
 
 export interface HealthResponse {
   ok: boolean;
+  uptimeSec?: number;
   runtime?: HealthRuntime;
   queue?: HealthQueue;
   chrome?: HealthChrome;

@@ -28,12 +28,11 @@ export function Books() {
   const [sortDir, setSortDir] = React.useState(1);
   const [selectedBook, setSelectedBook] = React.useState<string | null>(null);
 
-  const allBooks = booksData?.books || [];
   const failures = failuresData?.failures || [];
 
   const rows = React.useMemo(() => {
-    let list = allBooks.filter((b) => !filter || b.name.includes(filter));
-    list = [...list].sort((a, b) => {
+    const list = (booksData?.books || []).filter((b) => !filter || b.name.includes(filter));
+    return [...list].sort((a, b) => {
       const x = a[sortKey];
       const y = b[sortKey];
       if (sortKey === 'name') return sortDir * String(x).localeCompare(String(y), 'zh');
@@ -41,8 +40,7 @@ export function Books() {
       const yn = typeof y === 'number' ? y : -1;
       return sortDir * (xn - yn);
     });
-    return list;
-  }, [allBooks, filter, sortKey, sortDir]);
+  }, [booksData, filter, sortKey, sortDir]);
 
   const handleSort = (k: SortKey) => {
     if (sortKey === k) setSortDir((d) => -d);
@@ -53,7 +51,7 @@ export function Books() {
   };
 
   return (
-    <div className="space-y-5.5">
+    <div className="space-y-5">
       {/* Failures */}
       <section>
         <h2 className="mb-3 flex items-center gap-2.5 text-[13px] font-bold tracking-wide text-dim">
@@ -68,7 +66,7 @@ export function Books() {
                   {['书', '章节', '原因', '时间', ''].map((h) => (
                     <th
                       key={h}
-                      className="sticky top-0 z-[2] border-b border-white/[0.075] bg-surface-2/96 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm"
+                      className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm"
                     >
                       {h}
                     </th>
@@ -125,13 +123,13 @@ export function Books() {
                     <th
                       key={k}
                       onClick={() => handleSort(k)}
-                      className="sticky top-0 z-[2] cursor-pointer border-b border-white/[0.075] bg-surface-2/96 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm hover:text-txt"
+                      className="sticky top-0 z-[2] cursor-pointer border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm transition-colors hover:text-txt"
                     >
                       {label}
                       {sortKey === k && (sortDir > 0 ? ' ↑' : ' ↓')}
                     </th>
                   ))}
-                  <th className="sticky top-0 z-[2] border-b border-white/[0.075] bg-surface-2/96 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
                     进度
                   </th>
                 </tr>
@@ -151,22 +149,31 @@ export function Books() {
                       <tr
                         key={b.name}
                         onClick={() => setSelectedBook(b.name)}
-                        className="cursor-pointer border-b border-white/[0.075] transition-colors hover:bg-surface-3"
+                        className="cursor-pointer border-b border-white/[0.05] transition-colors hover:bg-surface-3/60"
                       >
                         <td className="px-3 py-2.5">
                           {b.name.slice(0, 34)}{' '}
                           <Badge variant={TIER_BADGE[b.tier] || 'default'}>{b.tier}</Badge>
                         </td>
-                        <td className="px-3 py-2.5 text-muted">{readersTxt(b.readers)}</td>
-                        <td className="px-3 py-2.5">{formatNum(b.selected)}</td>
-                        <td className="px-3 py-2.5 text-ok">{formatNum(b.done)}</td>
-                        <td className="px-3 py-2.5">{formatNum(b.pending)}</td>
-                        <td className={cn('px-3 py-2.5', b.failed ? 'text-fail' : 'text-dim')}>
+                        <td className="px-3 py-2.5 text-muted tabular-nums">
+                          {readersTxt(b.readers)}
+                        </td>
+                        <td className="px-3 py-2.5 tabular-nums">{formatNum(b.selected)}</td>
+                        <td className="px-3 py-2.5 text-ok tabular-nums">{formatNum(b.done)}</td>
+                        <td className="px-3 py-2.5 tabular-nums">{formatNum(b.pending)}</td>
+                        <td
+                          className={cn(
+                            'px-3 py-2.5 tabular-nums',
+                            b.failed ? 'text-fail' : 'text-dim',
+                          )}
+                        >
                           {formatNum(b.failed)}
                         </td>
                         <td className="px-3 py-2.5">
                           <MiniBar donePct={pct} failPct={fpct} />
-                          <span className="ml-1.5 text-xs text-muted">{pct.toFixed(0)}%</span>
+                          <span className="ml-1.5 text-xs text-muted tabular-nums">
+                            {pct.toFixed(0)}%
+                          </span>
                         </td>
                       </tr>
                     );
@@ -190,7 +197,7 @@ export function Books() {
   );
 }
 
-function FailureRow({
+const FailureRow = React.memo(function FailureRow({
   failure,
   taskId,
 }: {
@@ -219,7 +226,7 @@ function FailureRow({
   };
 
   return (
-    <tr className="border-b border-white/[0.075] transition-colors hover:bg-surface-3">
+    <tr className="border-b border-white/[0.05] transition-colors hover:bg-surface-3/60">
       <td className="px-3 py-2.5">{failure.book.slice(0, 28)}</td>
       <td className="px-3 py-2.5">{failure.chapter}</td>
       <td className="px-3 py-2.5">
@@ -237,7 +244,7 @@ function FailureRow({
       </td>
     </tr>
   );
-}
+});
 
 const CHAPTER_COLOR: Record<string, string> = {
   done: 'bg-ok',
@@ -266,14 +273,14 @@ function BookDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/65 p-5 backdrop-blur-md"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-5 backdrop-blur-md"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[88vh] w-[min(900px,94vw)] flex-col rounded-2xl border border-white/[0.14] bg-surface-2 shadow-[0_24px_60px_-28px_rgba(0,0,0,0.78)]"
+        className="flex max-h-[88vh] w-[min(900px,94vw)] flex-col rounded-2xl border border-white/[0.1] bg-surface-2 shadow-[0_24px_60px_-28px_rgba(0,0,0,0.8)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 border-b border-white/[0.075] px-4.5 py-3.5">
+        <div className="flex items-center gap-3 border-b border-white/[0.06] px-4.5 py-3.5">
           <strong className="text-[15px]">
             {outlinePath ? outlinePath.split(/[\\/]/).pop() : name}
           </strong>
@@ -287,7 +294,7 @@ function BookDetailModal({
                   : ''}
           </span>
           <button
-            className="ml-auto text-xl text-muted hover:text-txt"
+            className="ml-auto text-muted transition-colors hover:text-txt"
             onClick={() => {
               if (outlinePath) setOutlinePath(null);
               else onClose();
@@ -310,7 +317,7 @@ function BookDetailModal({
                     title={`${c.name} · ${c.status}`}
                     onClick={() => c.hasOutput && c.outputPath && setOutlinePath(c.outputPath)}
                     className={cn(
-                      'h-3.5 w-3.5 rounded',
+                      'h-3.5 w-3.5 rounded transition-transform hover:scale-125',
                       CHAPTER_COLOR[c.status] || 'bg-surface-3',
                       c.hasOutput && 'cursor-pointer',
                     )}

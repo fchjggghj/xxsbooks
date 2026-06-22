@@ -6,7 +6,7 @@ import { useConfig, useSaveConfig } from '@/hooks/useApi';
 import { useToast } from '@/hooks/useToast';
 import { useAppStore, TASK_LABELS, type TaskId } from '@/store/app';
 import { cn } from '@/lib/utils';
-import { Save, RotateCcw, Code } from 'lucide-react';
+import { Save, RotateCcw, Code, Cloud, Check } from 'lucide-react';
 import type { AppConfig } from '@/lib/api';
 
 interface FieldDef {
@@ -303,11 +303,13 @@ export function Config() {
   const [draft, setDraft] = React.useState<AppConfig | null>(null);
   const [showRaw, setShowRaw] = React.useState(false);
   const [rawText, setRawText] = React.useState('');
+  const [dirty, setDirty] = React.useState(false);
 
-  // 任务或数据变化时重置 draft
+  // 任务或数据变化时重置 draft（仅在没有未保存修改时）
   React.useEffect(() => {
     if (data?.config) {
       setDraft(JSON.parse(JSON.stringify(data.config)) as AppConfig);
+      setDirty(false);
     }
   }, [data?.config, currentTask]);
 
@@ -347,6 +349,7 @@ export function Config() {
       onSuccess: (r) => {
         toast.success((r as { msg?: string }).msg || `${taskLabel} 配置已保存`);
         setDraft(next);
+        setDirty(false);
       },
       onError: (e) => toast.error(String(e)),
     });
@@ -355,6 +358,7 @@ export function Config() {
   const handleReload = () => {
     if (data?.config) {
       setDraft(JSON.parse(JSON.stringify(data.config)) as AppConfig);
+      setDirty(false);
       toast.info('已重新载入');
     }
   };
@@ -372,6 +376,7 @@ export function Config() {
           toast.success((r as { msg?: string }).msg || '已保存');
           setDraft(obj);
           setShowRaw(false);
+          setDirty(false);
         },
         onError: (e) => toast.error(String(e)),
       });
@@ -380,10 +385,13 @@ export function Config() {
     }
   };
 
+  // 标记表单已修改
+  const markDirty = () => setDirty(true);
+
   return (
     <div className="space-y-3.5">
       <div className="flex flex-wrap items-center gap-2.5">
-        <Button variant="primary" onClick={handleSave}>
+        <Button variant="primary" onClick={handleSave} disabled={saveConfig.isPending}>
           <Save className="h-4 w-4" /> 保存 {taskLabel} 配置
         </Button>
         <Button onClick={handleReload}>
@@ -392,12 +400,46 @@ export function Config() {
         <Button onClick={handleOpenRaw}>
           <Code className="h-4 w-4" /> 原始 JSON
         </Button>
-        <span className="text-xs text-muted">
-          {data?.path} · 端口 {data?.port}
-        </span>
+        <div className="flex items-center gap-2 text-xs text-muted">
+          {/* 热更新状态指示器 */}
+          <span
+            className={cn(
+              'flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-semibold transition-colors',
+              dirty
+                ? 'border-warn/40 bg-warn/10 text-warn'
+                : saveConfig.isPending
+                  ? 'border-accent/40 bg-accent/10 text-accent-2'
+                  : 'border-ok/40 bg-ok/10 text-ok',
+            )}
+          >
+            {dirty ? (
+              <>
+                <Cloud className="h-3 w-3" /> 待保存
+              </>
+            ) : saveConfig.isPending ? (
+              <>
+                <Cloud className="h-3 w-3 animate-pulse" /> 同步中
+              </>
+            ) : (
+              <>
+                <Check className="h-3 w-3" /> 已同步
+              </>
+            )}
+          </span>
+          <span className="text-faint">·</span>
+          <span>{data?.path}</span>
+          <span className="text-faint">·</span>
+          <span>端口 {data?.port}</span>
+        </div>
       </div>
 
-      <div id="cfg-form" className="space-y-3.5">
+      {/* 热更新提示条 */}
+      <div className="rounded-lg border border-accent/20 bg-accent/[0.05] px-3.5 py-2 text-xs text-dim">
+        <Cloud className="mr-1.5 inline h-3 w-3 text-accent-2" />
+        配置保存后立即生效（热更新）：runner 下一轮自动读取新配置，无需重启服务。
+      </div>
+
+      <div id="cfg-form" className="space-y-3.5" onChange={markDirty}>
         {schema.map((grp) => (
           <Card key={grp.g}>
             <CardContent className="px-4 pb-4 pt-1.5">
@@ -409,7 +451,7 @@ export function Config() {
                     key={f.k}
                     className={cn(
                       'grid grid-cols-[210px_1fr] items-start gap-4 py-2.75',
-                      idx > 0 && 'border-t border-white/[0.075]',
+                      idx > 0 && 'border-t border-white/[0.05]',
                       'max-[860px]:grid-cols-1',
                     )}
                   >
@@ -422,8 +464,14 @@ export function Config() {
                     </div>
                     <div className="flex items-center gap-2">
                       {f.t === 'bool' ? (
-                        <label className="flex items-center gap-2 text-sm text-muted">
-                          <input type="checkbox" data-k={f.k} data-t="bool" defaultChecked={!!v} />
+                        <label className="flex cursor-pointer items-center gap-2 text-sm text-muted transition-colors hover:text-txt">
+                          <input
+                            type="checkbox"
+                            data-k={f.k}
+                            data-t="bool"
+                            defaultChecked={!!v}
+                            className="h-4 w-4 cursor-pointer rounded border-border accent-accent"
+                          />
                           开启
                         </label>
                       ) : f.t === 'number' ? (
@@ -439,14 +487,14 @@ export function Config() {
                           data-t="lines"
                           placeholder="每行一个"
                           defaultValue={Array.isArray(v) ? (v as string[]).join('\n') : ''}
-                          className="min-h-[72px] w-full resize-y rounded-[10px] border border-border bg-surface-3 p-2.5 font-mono-code text-xs leading-relaxed text-txt focus:border-accent focus:outline-none"
+                          className="min-h-[72px] w-full resize-y rounded-[10px] border border-border/80 bg-surface-3/80 p-2.5 font-mono-code text-xs leading-relaxed text-txt transition-all duration-150 hover:border-border focus:border-accent focus:bg-surface-2 focus:outline-none focus:ring-2 focus:ring-accent/20"
                         />
                       ) : f.t === 'textarea' ? (
                         <textarea
                           data-k={f.k}
                           data-t="text"
                           defaultValue={(v as string | undefined) ?? ''}
-                          className="min-h-[72px] w-full resize-y rounded-[10px] border border-border bg-surface-3 p-2.5 font-mono-code text-xs leading-relaxed text-txt focus:border-accent focus:outline-none"
+                          className="min-h-[72px] w-full resize-y rounded-[10px] border border-border/80 bg-surface-3/80 p-2.5 font-mono-code text-xs leading-relaxed text-txt transition-all duration-150 hover:border-border focus:border-accent focus:bg-surface-2 focus:outline-none focus:ring-2 focus:ring-accent/20"
                         />
                       ) : (
                         <Input
@@ -467,17 +515,17 @@ export function Config() {
       {/* Raw JSON modal */}
       {showRaw && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/65 p-5 backdrop-blur-md"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-5 backdrop-blur-md"
           onClick={() => setShowRaw(false)}
         >
           <div
-            className="flex max-h-[88vh] w-[min(900px,94vw)] flex-col rounded-2xl border border-white/[0.14] bg-surface-2 shadow-[0_24px_60px_-28px_rgba(0,0,0,0.78)]"
+            className="flex max-h-[88vh] w-[min(900px,94vw)] flex-col rounded-2xl border border-white/[0.1] bg-surface-2 shadow-[0_24px_60px_-28px_rgba(0,0,0,0.8)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center gap-3 border-b border-white/[0.075] px-4.5 py-3.5">
+            <div className="flex items-center gap-3 border-b border-white/[0.06] px-4.5 py-3.5">
               <strong className="text-[15px]">{taskLabel} config.json（原始，可编辑保存）</strong>
               <button
-                className="ml-auto text-xl text-muted hover:text-txt"
+                className="ml-auto text-xl text-muted transition-colors hover:text-txt"
                 onClick={() => setShowRaw(false)}
               >
                 ×
@@ -487,10 +535,10 @@ export function Config() {
               <textarea
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
-                className="min-h-[420px] w-full resize-y rounded-[10px] border border-border bg-surface-3 p-3 font-mono-code text-xs leading-relaxed text-txt focus:border-accent focus:outline-none"
+                className="min-h-[420px] w-full resize-y rounded-[10px] border border-border/80 bg-surface-3/80 p-3 font-mono-code text-xs leading-relaxed text-txt transition-all duration-150 hover:border-border focus:border-accent focus:bg-surface-2 focus:outline-none focus:ring-2 focus:ring-accent/20"
               />
               <div className="mt-2.5 text-right">
-                <Button variant="primary" onClick={handleSaveRaw}>
+                <Button variant="primary" onClick={handleSaveRaw} disabled={saveConfig.isPending}>
                   保存原始 JSON
                 </Button>
               </div>
