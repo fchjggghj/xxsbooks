@@ -1,5 +1,11 @@
 import { useState, useEffect } from 'react';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { useToast } from '@/hooks/useToast';
 import { apiGet, apiPost, apiPut, apiDelete, type AdaptDirection, type DirectionsResponse, type BatchSyncResponse, type LibraryBook } from '../lib/api';
+import { Search, RefreshCw, Edit2, Trash2, X, ChevronRight, Sparkles } from 'lucide-react';
 
 export default function Direction() {
   const [directions, setDirections] = useState<AdaptDirection[]>([]);
@@ -10,6 +16,7 @@ export default function Direction() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingDirection, setEditingDirection] = useState<AdaptDirection | null>(null);
   const [loading, setLoading] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     fetchDirections();
@@ -24,7 +31,7 @@ export default function Direction() {
       const res = await apiGet<DirectionsResponse>(`/directions?${params.toString()}`);
       setDirections(res.directions);
     } catch (err) {
-      console.error('获取改编方向失败:', err);
+      toast.error(String(err));
     } finally {
       setLoading(false);
     }
@@ -35,16 +42,17 @@ export default function Direction() {
       const res = await apiGet<{ books: LibraryBook[] }>('/library');
       setBooks(res.books);
     } catch (err) {
-      console.error('获取书籍列表失败:', err);
+      toast.error(String(err));
     }
   }
 
   async function handleBatchSync() {
     try {
       await apiPost<BatchSyncResponse>('/directions/batch');
+      toast.success('批量同步完成');
       fetchDirections();
     } catch (err) {
-      console.error('批量同步失败:', err);
+      toast.error(String(err));
     }
   }
 
@@ -57,10 +65,11 @@ export default function Direction() {
     if (!editingDirection) return;
     try {
       await apiPut<AdaptDirection>(`/directions/${editingDirection.id}`, editingDirection);
+      toast.success('保存成功');
       setShowEditModal(false);
       fetchDirections();
     } catch (err) {
-      console.error('保存失败:', err);
+      toast.error(String(err));
     }
   }
 
@@ -68,9 +77,10 @@ export default function Direction() {
     if (!confirm('确定删除该改编方向？')) return;
     try {
       await apiDelete(`/directions/${directionId}`);
+      toast.success('删除成功');
       fetchDirections();
     } catch (err) {
-      console.error('删除失败:', err);
+      toast.error(String(err));
     }
   }
 
@@ -86,28 +96,26 @@ export default function Direction() {
   const worldIndices = [...new Set(directions.map((d) => d.worldIndex))];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">改编方向管理</h1>
-          <p className="text-gray-500 mt-1">管理各小说世界的改编方向建议</p>
+          <span className="block text-[11px] font-bold uppercase tracking-[1.6px] text-muted">Adaptation Direction</span>
+          <h1 className="mt-0.5 text-[18px] font-bold">改编方向管理</h1>
         </div>
-        <button
-          onClick={handleBatchSync}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
+        <Button onClick={handleBatchSync} disabled={loading}>
+          <RefreshCw className="mr-2 h-4 w-4" />
           批量同步
-        </button>
+        </Button>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm p-4">
+      <Card className="p-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">选择书籍</label>
+            <label className="block text-xs text-muted mb-1.5">选择书籍</label>
             <select
               value={selectedBookId}
               onChange={(e) => setSelectedBookId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="w-full h-9 rounded-md border border-white/[0.1] bg-surface-2 px-3 text-sm text-txt focus:outline-none focus:ring-2 focus:ring-accent/40"
             >
               <option value="">全部书籍</option>
               {books.map((book) => (
@@ -118,11 +126,11 @@ export default function Direction() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">世界编号</label>
+            <label className="block text-xs text-muted mb-1.5">世界编号</label>
             <select
               value={filterWorldIndex}
               onChange={(e) => setFilterWorldIndex(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="w-full h-9 rounded-md border border-white/[0.1] bg-surface-2 px-3 text-sm text-txt focus:outline-none focus:ring-2 focus:ring-accent/40"
             >
               <option value="">全部编号</option>
               {worldIndices.map((idx) => (
@@ -131,112 +139,147 @@ export default function Direction() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">搜索</label>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索世界名称或核心冲突..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            />
+            <label className="block text-xs text-muted mb-1.5">搜索</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索世界名称或核心冲突..."
+                className="pl-9"
+              />
+            </div>
           </div>
         </div>
-      </div>
+      </Card>
 
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl shadow-sm p-4">
-          <div className="text-gray-500 text-sm">总改编方向</div>
-          <div className="text-2xl font-bold text-gray-900">{directions.length}</div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm p-4">
-          <div className="text-gray-500 text-sm">关联书籍</div>
-          <div className="text-2xl font-bold text-blue-600">{worldIndices.length}</div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm p-4">
-          <div className="text-gray-500 text-sm">当前筛选</div>
-          <div className="text-2xl font-bold text-green-600">{filteredDirections.length}</div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm p-4">
-          <div className="text-gray-500 text-sm">平均字数</div>
-          <div className="text-2xl font-bold text-purple-600">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Card className="p-3 border-glow">
+          <div className="flex items-center gap-2 mb-1">
+            <Sparkles className="h-4 w-4 text-accent-2" />
+            <span className="text-xs text-muted">总改编方向</span>
+          </div>
+          <div className="text-2xl font-bold text-gradient">{directions.length}</div>
+        </Card>
+        <Card className="p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <ChevronRight className="h-4 w-4 text-cyan" />
+            <span className="text-xs text-muted">关联书籍</span>
+          </div>
+          <div className="text-2xl font-bold text-cyan">{worldIndices.length}</div>
+        </Card>
+        <Card className="p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <Search className="h-4 w-4 text-ok" />
+            <span className="text-xs text-muted">当前筛选</span>
+          </div>
+          <div className="text-2xl font-bold text-ok">{filteredDirections.length}</div>
+        </Card>
+        <Card className="p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <Badge variant="outline" className="h-4 w-4 p-0">📝</Badge>
+            <span className="text-xs text-muted">平均字数</span>
+          </div>
+          <div className="text-2xl font-bold text-violet">
             {directions.length ? Math.round(directions.reduce((sum, d) => sum + d.coreConflict.length, 0) / directions.length) : 0}
           </div>
-        </div>
+        </Card>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
+      <Card className="overflow-hidden">
+        <div className="overflow-auto rounded-2xl">
+          <table className="w-full min-w-[720px] border-collapse text-[13px]">
+            <thead>
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">书籍</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">世界</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">核心冲突</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">主角</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">风格</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">主题</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创建时间</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  书籍
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  世界
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  核心冲突
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  主角
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  风格
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  主题
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  创建时间
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  操作
+                </th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
-                    加载中...
+                  <td colSpan={8} className="py-5 text-center text-muted">
+                    加载中…
                   </td>
                 </tr>
               ) : filteredDirections.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={8} className="py-5 text-center text-muted">
                     暂无改编方向数据
                   </td>
                 </tr>
               ) : (
                 filteredDirections.map((direction) => (
-                  <tr key={direction.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  <tr
+                    key={direction.id}
+                    className="border-b border-white/[0.05] transition-colors hover:bg-surface-3/60"
+                  >
+                    <td className="px-3 py-2.5">
+                      <Badge variant="outline" className="font-mono">
                         {direction.bookId}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    <td className="px-3 py-2.5">
+                      <Badge className="bg-accent/15 text-accent-2">
                         世界{direction.worldIndex}: {direction.worldName}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-4 py-3 max-w-xs">
-                      <p className="text-sm text-gray-900 truncate" title={direction.coreConflict}>
+                    <td className="px-3 py-2.5 max-w-xs">
+                      <p className="text-sm text-txt truncate" title={direction.coreConflict}>
                         {direction.coreConflict}
                       </p>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{direction.protagonist.name}</div>
-                      <div className="text-xs text-gray-500">{direction.protagonist.personality}</div>
+                    <td className="px-3 py-2.5">
+                      <div className="text-sm text-txt">{direction.protagonist.name}</div>
+                      <div className="text-xs text-muted">{direction.protagonist.personality}</div>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{direction.tone}</div>
-                      <div className="text-xs text-gray-500">{direction.readerTarget}</div>
+                    <td className="px-3 py-2.5">
+                      <div className="text-sm text-txt">{direction.tone}</div>
+                      <div className="text-xs text-muted">{direction.readerTarget}</div>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-3 py-2.5 text-sm text-muted">
                       {direction.theme}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-3 py-2.5 text-sm text-muted">
                       {new Date(direction.createdAt).toLocaleDateString()}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-1">
                         <button
                           onClick={() => handleEdit(direction)}
-                          className="text-blue-600 hover:text-blue-900 text-sm"
+                          className="rounded p-1 text-muted transition-colors hover:text-txt"
+                          title="编辑"
                         >
-                          编辑
+                          <Edit2 className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(direction.id)}
-                          className="text-red-600 hover:text-red-900 text-sm"
+                          className="rounded p-1 text-muted transition-colors hover:text-rose-400"
+                          title="删除"
                         >
-                          删除
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </td>
@@ -246,142 +289,121 @@ export default function Direction() {
             </tbody>
           </table>
         </div>
-      </div>
+      </Card>
 
       {showEditModal && editingDirection && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold">编辑改编方向</h2>
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-5 backdrop-blur-md"
+          onClick={() => setShowEditModal(false)}
+        >
+          <div
+            className="flex w-[min(700px,94vw)] flex-col rounded-2xl border border-white/[0.1] bg-surface-2 shadow-[0_24px_60px_-28px_rgba(0,0,0,0.8)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 border-b border-white/[0.06] px-4.5 py-3.5">
+              <Edit2 className="h-5 w-5" />
+              <strong className="text-[15px]">编辑改编方向</strong>
               <button
+                className="ml-auto text-muted transition-colors hover:text-txt"
                 onClick={() => setShowEditModal(false)}
-                className="text-gray-500 hover:text-gray-700"
               >
-                ✕
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">书籍ID</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs text-muted mb-1">书籍ID</label>
+                  <Input
                     value={editingDirection.bookId}
                     onChange={(e) => setEditingDirection({ ...editingDirection, bookId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">世界名称</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs text-muted mb-1">世界名称</label>
+                  <Input
                     value={editingDirection.worldName}
                     onChange={(e) => setEditingDirection({ ...editingDirection, worldName: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">核心冲突</label>
+                <label className="block text-xs text-muted mb-1">核心冲突</label>
                 <textarea
                   value={editingDirection.coreConflict}
                   onChange={(e) => setEditingDirection({ ...editingDirection, coreConflict: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  rows={3}
+                  className="w-full h-20 rounded-md border border-white/[0.1] bg-surface-3 px-3 py-2 text-sm text-txt focus:outline-none focus:ring-2 focus:ring-accent/40 resize-none"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">主角名称</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs text-muted mb-1">主角名称</label>
+                  <Input
                     value={editingDirection.protagonist.name}
                     onChange={(e) => setEditingDirection({ ...editingDirection, protagonist: { ...editingDirection.protagonist, name: e.target.value } })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">主角性格</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs text-muted mb-1">主角性格</label>
+                  <Input
                     value={editingDirection.protagonist.personality}
                     onChange={(e) => setEditingDirection({ ...editingDirection, protagonist: { ...editingDirection.protagonist, personality: e.target.value } })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">主角动机</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs text-muted mb-1">主角动机</label>
+                  <Input
                     value={editingDirection.protagonist.motivation}
                     onChange={(e) => setEditingDirection({ ...editingDirection, protagonist: { ...editingDirection.protagonist, motivation: e.target.value } })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">主角弧线</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs text-muted mb-1">主角弧线</label>
+                  <Input
                     value={editingDirection.protagonist.arc}
                     onChange={(e) => setEditingDirection({ ...editingDirection, protagonist: { ...editingDirection.protagonist, arc: e.target.value } })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">风格</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs text-muted mb-1">风格</label>
+                  <Input
                     value={editingDirection.tone}
                     onChange={(e) => setEditingDirection({ ...editingDirection, tone: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">读者定位</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs text-muted mb-1">读者定位</label>
+                  <Input
                     value={editingDirection.readerTarget}
                     onChange={(e) => setEditingDirection({ ...editingDirection, readerTarget: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">主题</label>
-                <input
-                  type="text"
+                <label className="block text-xs text-muted mb-1">主题</label>
+                <Input
                   value={editingDirection.theme}
                   onChange={(e) => setEditingDirection({ ...editingDirection, theme: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">关键转折（每行一个）</label>
+                <label className="block text-xs text-muted mb-1">关键转折（每行一个）</label>
                 <textarea
                   value={editingDirection.keyTwists.join('\n')}
                   onChange={(e) => setEditingDirection({ ...editingDirection, keyTwists: e.target.value.split('\n').filter(Boolean) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  rows={4}
+                  className="w-full h-24 rounded-md border border-white/[0.1] bg-surface-3 px-3 py-2 text-sm text-txt focus:outline-none focus:ring-2 focus:ring-accent/40 resize-none"
                 />
               </div>
             </div>
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t">
-              <button
-                onClick={() => setShowEditModal(false)}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-              >
+            <div className="flex justify-end gap-2 pt-2 border-t border-white/[0.06] px-4.5 py-3.5">
+              <Button variant="outline" onClick={() => setShowEditModal(false)}>
                 取消
-              </button>
-              <button
-                onClick={handleSave}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                保存
-              </button>
+              </Button>
+              <Button onClick={handleSave}>保存</Button>
             </div>
           </div>
         </div>

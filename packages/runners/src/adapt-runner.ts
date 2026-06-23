@@ -25,26 +25,30 @@ import {
   type AdaptConfig,
   type OutlineItem,
   type Novel,
+  type RateLimitInfo,
+  type DeepSeekConfig,
   // 工具
-  log,
   errorMessage,
   isBrowserClosedError,
   boundedMs,
   sleep,
   isRefusal,
   isUsable,
+  log,
   // 配置
   loadConfig as loadConfigFile,
   getConfigPath,
   // chatgpt
   getPages,
   newConversation,
-  sendAndCollect,
+  sendAndCollect as sendAndCollectChatGPT,
   editLastUserMessage,
-  hitRateLimit,
+  hitRateLimit as hitRateLimitChatGPT,
   inspectPageState,
   getLastAssistantText,
   deleteCurrentConversation,
+  // deepseek
+  deepseek,
 } from '@novel-pipeline/shared';
 import { buildBatchPrompt, splitBatch } from './batch-utils.js';
 import { createFileLogger, acquireLock, releaseLock } from './runner-core.js';
@@ -58,6 +62,19 @@ const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 function loadConfig(): AdaptConfig {
   const cfgPath = getConfigPath('adapt', PROJECT_ROOT);
   return loadConfigFile<AdaptConfig>(cfgPath);
+}
+
+function createDeepSeekConfig(cfg: AdaptConfig): DeepSeekConfig {
+  return {
+    apiKey: cfg.deepseekApiKey,
+    baseUrl: cfg.deepseekBaseUrl || undefined,
+    model: cfg.deepseekModel || undefined,
+    temperature: cfg.deepseekTemperature || undefined,
+    maxTokens: cfg.deepseekMaxTokens || undefined,
+    timeoutMs: cfg.waitReplyTimeoutMs || undefined,
+    rateLimitWaitMs: cfg.rateLimitWaitMs || undefined,
+    maxRateLimitWaitMs: cfg.maxRateLimitWaitMs || undefined,
+  };
 }
 
 // ---------- 文件操作 ----------
@@ -291,7 +308,7 @@ async function sendAndConfirm(
   const beforeUrl = page.url();
 
   // 发送并等待回复
-  const result = await sendAndCollect(page, prompt, cfg);
+  const result = await sendAndCollectChatGPT(page, prompt, cfg);
 
   // 额外确认：assistant 消息数必须增加了
   const afterState = await inspectPageState(page);
@@ -374,9 +391,16 @@ async function run(cfg: AdaptConfig, dryRun: boolean): Promise<RunResult> {
     };
   }
 
-  if (!cfg.gptUrl || cfg.gptUrl.includes('在这里填')) {
-    throw new Error('请先在 config.json 填入改编 GPT 链接 gptUrl');
+  if (cfg.aiProvider === 'chatgpt') {
+    if (!cfg.gptUrl || cfg.gptUrl.includes('在这里填')) {
+      throw new Error('请先在 config.json 填入改编 GPT 链接 gptUrl');
+    }
+  } else if (cfg.aiProvider === 'deepseek') {
+    if (!cfg.deepseekApiKey || cfg.deepseekApiKey.includes('在这里填')) {
+      throw new Error('请先在 config.json 填入 DeepSeek API Key');
+    }
   }
+
   if (!pendingOutlines) {
     log('没有待处理大纲，全部已完成。');
     return { pending: 0, total: totalOutlines, novels: totalNovels, done: 0, failed: 0 };
@@ -386,284 +410,413 @@ async function run(cfg: AdaptConfig, dryRun: boolean): Promise<RunResult> {
   const lock = acquireLock('adapt');
 
   try {
-  const workers = Math.min(concurrency, 1);
-  log(`连接 Chrome（CDP），准备 ${workers} 个标签页…`);
-  const { pages } = await getPages(cfg, workers);
-  let page = pages[0];
-  log('已就绪');
-
-  const limit = Number(cfg.maxChapters) > 0 ? Number(cfg.maxChapters) : Infinity;
-  if (limit !== Infinity) {
-    log(`本次最多处理 ${limit} 章（maxChapters，试跑用；设 0 = 不限）`);
-  }
-
-  const prefix = cfg.promptPrefix || '';
-  const minChars = Number(cfg.minOutputChars ?? 300);
-  const usable = (s: string) => isUsable(s, minChars);
-
-  let done = 0;
-  let failed = 0;
-  let attempted = 0;
-
-  // 重连浏览器，回到指定对话
-  async function reconnectBrowser(conversationUrl: string | null): Promise<Page> {
-    log('⚠ 尝试重连浏览器…');
-    const result = await getPages(cfg, 1);
-    page = result.pages[0];
-    if (conversationUrl) {
-      log(`  回到对话: ${conversationUrl}`);
-      await page.goto(conversationUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await sleep(2000);
-      // 等待输入框就绪
-      await page
-        .waitForSelector(
-          '#prompt-textarea, textarea[name="prompt-textarea"], [data-testid="composer-input"]',
-          { timeout: 30000 },
-        )
-        .catch(() => {});
-      await sleep(1000);
+    let page: Page | null = null;
+    if (cfg.aiProvider === 'chatgpt') {
+      const workers = Math.min(concurrency, 1);
+      log(`连接 Chrome（CDP），准备 ${workers} 个标签页…`);
+      const { pages } = await getPages(cfg, workers);
+      page = pages[0];
+      log('已就绪');
     } else {
-      await newConversation(page, cfg);
+      log('使用 DeepSeek API，跳过浏览器连接');
     }
-    log('✓ 重连成功');
-    return page;
-  }
 
-  // 单章发送（兜底用，在当前对话内发送，不开新对话）
-  async function sendSingle(outline: OutlineItem): Promise<'done' | 'failed' | 'policy_refusal'> {
-    const prompt = prefix ? `${prefix}\n\n${readOutline(outline)}` : readOutline(outline);
-    const maxStuck = Number(cfg.stuckRetries ?? 3);
+    const limit = Number(cfg.maxChapters) > 0 ? Number(cfg.maxChapters) : Infinity;
+    if (limit !== Infinity) {
+      log(`本次最多处理 ${limit} 章（maxChapters，试跑用；设 0 = 不限）`);
+    }
 
-    for (let attempt = 1; attempt <= maxStuck; attempt++) {
-      if (attempt > 1) {
-        log(`↻ ${outline.name}: 重试 ${attempt}/${maxStuck}（编辑上一条消息）…`);
-      }
+    const prefix = cfg.promptPrefix || '';
+    const minChars = Number(cfg.minOutputChars ?? 300);
+    const usable = (s: string) => isUsable(s, minChars);
 
-      let text: string;
-      let timedOut: boolean;
-      try {
-        if (attempt === 1) {
-          // 第一次：发新消息
-          const r = await sendAndConfirm(page, prompt, cfg);
-          text = r.text;
-          timedOut = r.timedOut;
-        } else {
-          // 重试：编辑上一条用户消息（不增加对话长度，避免对话越来越长导致超时）
-          try {
-            const r = await editLastUserMessage(page, prompt, cfg);
-            text = r.text;
-            timedOut = r.timedOut;
-          } catch (editErr) {
-            // 编辑失败（如找不到用户消息），退回发新消息
-            log(`  编辑失败，改用发新消息: ${errorMessage(editErr)}`);
-            const r = await sendAndConfirm(page, prompt, cfg);
-            text = r.text;
-            timedOut = r.timedOut;
-          }
-        }
-      } catch (err) {
-        if (isBrowserClosedError(err)) throw err;
-        log(`✗ ${outline.name}: 发送失败 - ${errorMessage(err)}`);
-        continue;
-      }
+    let done = 0;
+    let failed = 0;
+    let attempted = 0;
 
-      if (isRefusal(text)) {
-        log(`✗ ${outline.name}: 被内容政策拒绝`);
-        failed++;
-        return 'policy_refusal';
-      }
-
-      if (usable(text)) {
-        if (writeOutput(outline, text)) {
-          done++;
-          log(`✓ ${outline.name} -> ${path.basename(outline.outputPath)}（${text.length} 字）`);
-        }
-        return 'done';
-      }
-
-      // 配额墙？
-      if (await hitRateLimit(page)) {
-        const waitMs = boundedMs(cfg.rateLimitWaitMs, 30 * 60 * 1000);
-        log(`⚠ 撞配额墙，暂停 ${Math.ceil(waitMs / 60000)} 分钟…`);
-        await sleep(waitMs);
-        attempt--;
-        continue;
-      }
-      // 文本不可用但没撞配额墙
-      if (timedOut) {
-        log(`↻ ${outline.name}: 超时（30分钟兜底），重试…`);
+    // 重连浏览器，回到指定对话
+    async function reconnectBrowser(conversationUrl: string | null): Promise<Page> {
+      log('⚠ 尝试重连浏览器…');
+      const result = await getPages(cfg, 1);
+      page = result.pages[0];
+      if (conversationUrl) {
+        log(`  回到对话: ${conversationUrl}`);
+        await page.goto(conversationUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await sleep(2000);
+        // 等待输入框就绪
+        await page
+          .waitForSelector(
+            '#prompt-textarea, textarea[name="prompt-textarea"], [data-testid="composer-input"]',
+            { timeout: 30000 },
+          )
+          .catch(() => {});
+        await sleep(1000);
       } else {
-        log(`↻ ${outline.name}: 回复不可用，重试…`);
+        await newConversation(page, cfg);
       }
+      log('✓ 重连成功');
+      return page;
     }
 
-    log(`✗ ${outline.name}: 重试耗尽`);
-    failed++;
-    return 'failed';
-  }
+    // 单章发送（兜底用，在当前对话内发送，不开新对话）
+    async function sendSingle(outline: OutlineItem): Promise<'done' | 'failed' | 'policy_refusal'> {
+      const prompt = prefix ? `${prefix}\n\n${readOutline(outline)}` : readOutline(outline);
+      const maxStuck = Number(cfg.stuckRetries ?? 3);
 
-  // 批量发送（在当前对话内发送，不开新对话）
-  async function sendBatchWithKeep(toSend: OutlineItem[], keepIndices: number[]): Promise<boolean> {
-    const prompt = buildBatchPrompt(toSend, readOutline, prefix);
-    const maxStuck = Number(cfg.stuckRetries ?? 3);
-
-    for (let attempt = 1; attempt <= maxStuck; attempt++) {
-      let text: string;
-      try {
-        const r = await sendAndConfirm(page, prompt, cfg);
-        text = r.text;
-      } catch (err) {
-        if (isBrowserClosedError(err)) throw err;
-        log(`↻ 批量发送失败: ${errorMessage(err)}`);
-        continue;
-      }
-
-      if (isRefusal(text)) {
-        log(`↻ 批量(${toSend.length}章)被政策拒绝，转逐章…`);
-        return false;
-      }
-
-      const segs = splitBatch(text, toSend.length);
-      if (segs && segs.every(usable)) {
-        let saved = 0;
-        for (const idx of keepIndices) {
-          if (idx < 0 || idx >= toSend.length) continue;
-          if (writeOutput(toSend[idx], segs[idx])) {
-            done++;
-            saved++;
-          }
-        }
-        log(`✓ 批量${toSend.length}章完成 -> 保留${saved}章（${segs[keepIndices[0]]?.length || 0} 字）`);
-        return true;
-      }
-
-      // 配额墙？
-      if (await hitRateLimit(page)) {
-        const waitMs = boundedMs(cfg.rateLimitWaitMs, 30 * 60 * 1000);
-        log(`⚠ 批量撞配额墙，暂停 ${Math.ceil(waitMs / 60000)} 分钟…`);
-        await sleep(waitMs);
-        attempt--;
-        continue;
-      }
-
-      log(
-        `↻ 批量切分失败（期望${toSend.length}段，实际${segs ? '格式不对' : '未找到标记'}），重试 ${attempt}/${maxStuck}…`,
-      );
-    }
-    return false;
-  }
-
-  // 逐本处理
-  for (const { novel, pending } of plan) {
-    if (attempted >= limit) break;
-    if (!pending.length) continue;
-
-    log(`开始小说: ${novel.name}（待处理 ${pending.length} 章）`);
-
-    // 按剧情线分组（快穿小说按"世界"分剧情线）
-    const arcs = groupByStoryArc(pending);
-    log(`剧情线分组：共 ${arcs.length} 条剧情线`);
-    for (const a of arcs) {
-      const pendingInArc = a.items.filter((o) => !isDone(o));
-      if (pendingInArc.length) {
-        log(`  [${a.arc}] ${a.items.length} 章（待处理 ${pendingInArc.length}）`);
-      }
-    }
-
-    // 每个剧情线开新对话处理
-    for (const { arc, items } of arcs) {
-      if (attempted >= limit) break;
-
-      // 过滤已完成的章节
-      const arcPending = items.filter((o) => !isDone(o));
-      if (!arcPending.length) continue;
-
-      log(`----- 剧情线: ${arc}（待处理 ${arcPending.length} 章）-----`);
-
-      // 每个剧情线开新对话
-      await newConversation(page, cfg);
-      log('已开新对话');
-      let conversationUrl: string | null = null;
-
-      // 超长剧情线分子批次（每批最多 batchSize 章）
-      const arcBatches = splitArcIntoBatches(arcPending, batchSize);
-      log(`子批次：共 ${arcBatches.length} 批（每批最多 ${batchSize} 章）`);
-
-      for (let bi = 0; bi < arcBatches.length; bi++) {
-        if (attempted >= limit) break;
-        // maxChapters 限制：如果剩余配额不够整个批次，只取前 remaining 章
-        const remaining = limit - attempted;
-        const batch = remaining < arcBatches[bi].length ? arcBatches[bi].slice(0, remaining) : arcBatches[bi];
-        log(`  子批次 ${bi + 1}/${arcBatches.length}：${batch.length} 章`);
-
-        // 尝试批量发送
-        const ok = await sendBatchWithKeep(batch, batch.map((_, i) => i));
-
-        // 捕获对话URL
-        if (!conversationUrl) {
-          const curUrl = page.url();
-          if (/\/c\//.test(curUrl)) {
-            conversationUrl = curUrl;
-            log(`  对话URL: ${conversationUrl}`);
-          }
+      for (let attempt = 1; attempt <= maxStuck; attempt++) {
+        if (attempt > 1) {
+          log(`↻ ${outline.name}: 重试 ${attempt}/${maxStuck}（编辑上一条消息）…`);
         }
 
-        if (!ok) {
-          // 批量失败，回退逐章（重试时用编辑上一条消息）
-          log(`  批量不成，回退逐章处理…`);
-          for (const o of batch) {
-            if (isDone(o)) continue;
-            if (attempted >= limit) break;
+        let text: string;
+        let timedOut: boolean;
+        try {
+          if (attempt === 1) {
+            // 第一次：发新消息
+            const r = await sendAndConfirm(page!, prompt, cfg);
+            text = r.text;
+            timedOut = r.timedOut;
+          } else {
+            // 重试：编辑上一条用户消息（不增加对话长度，避免对话越来越长导致超时）
             try {
-              const r = await sendSingle(o);
-              attempted++;
-              if (r === 'failed') {
-                log(`  ⚠ ${o.name}: 逐章也失败，跳过`);
-              }
-              await sleep(cfg.betweenChaptersMs || 1000);
-            } catch (err) {
-              if (isBrowserClosedError(err)) {
-                try {
-                  page = await reconnectBrowser(conversationUrl);
-                  continue;
-                } catch (reconnErr) {
-                  log(`FATAL 重连失败: ${errorMessage(reconnErr)}`);
-                  throw err;
-                }
-              }
-              log(`  ✗ ${o.name}: ${errorMessage(err)}`);
-              failed++;
-              attempted++;
+              const r = await editLastUserMessage(page!, prompt, cfg);
+              text = r.text;
+              timedOut = r.timedOut;
+            } catch (editErr) {
+              // 编辑失败（如找不到用户消息），退回发新消息
+              log(`  编辑失败，改用发新消息: ${errorMessage(editErr)}`);
+              const r = await sendAndConfirm(page!, prompt, cfg);
+              text = r.text;
+              timedOut = r.timedOut;
             }
           }
+        } catch (err) {
+          if (isBrowserClosedError(err)) throw err;
+          log(`✗ ${outline.name}: 发送失败 - ${errorMessage(err)}`);
+          continue;
+        }
+
+        if (isRefusal(text)) {
+          log(`✗ ${outline.name}: 被内容政策拒绝`);
+          failed++;
+          return 'policy_refusal';
+        }
+
+        if (usable(text)) {
+          if (writeOutput(outline, text)) {
+            done++;
+            log(`✓ ${outline.name} -> ${path.basename(outline.outputPath)}（${text.length} 字）`);
+          }
+          return 'done';
+        }
+
+        // 配额墙？
+        if (await hitRateLimitChatGPT(page!)) {
+          const waitMs = boundedMs(cfg.rateLimitWaitMs, 30 * 60 * 1000);
+          log(`⚠ 撞配额墙，暂停 ${Math.ceil(waitMs / 60000)} 分钟…`);
+          await sleep(waitMs);
+          attempt--;
+          continue;
+        }
+        // 文本不可用但没撞配额墙
+        if (timedOut) {
+          log(`↻ ${outline.name}: 超时（30分钟兜底），重试…`);
         } else {
-          attempted += batch.length;
-          await sleep(cfg.betweenChaptersMs || 1000);
+          log(`↻ ${outline.name}: 回复不可用，重试…`);
         }
       }
 
-      log(`----- 剧情线 ${arc} 完成 -----`);
+      log(`✗ ${outline.name}: 重试耗尽`);
+      failed++;
+      return 'failed';
     }
 
-    log(`========== ${novel.name} 本轮结束 ==========`);
+    // 批量发送（在当前对话内发送，不开新对话）
+    async function sendBatchWithKeep(toSend: OutlineItem[], keepIndices: number[]): Promise<boolean> {
+      const prompt = buildBatchPrompt(toSend, readOutline, prefix);
+      const maxStuck = Number(cfg.stuckRetries ?? 3);
 
-    if (cfg.deleteConversationAfterDone) {
-      try {
-        await deleteCurrentConversation(page);
-      } catch {
-        /* 忽略 */
+      for (let attempt = 1; attempt <= maxStuck; attempt++) {
+        let text: string;
+        try {
+          const r = await sendAndConfirm(page!, prompt, cfg);
+          text = r.text;
+        } catch (err) {
+          if (isBrowserClosedError(err)) throw err;
+          log(`↻ 批量发送失败: ${errorMessage(err)}`);
+          continue;
+        }
+
+        if (isRefusal(text)) {
+          log(`↻ 批量(${toSend.length}章)被政策拒绝，转逐章…`);
+          return false;
+        }
+
+        const segs = splitBatch(text, toSend.length);
+        if (segs && segs.every(usable)) {
+          let saved = 0;
+          for (const idx of keepIndices) {
+            if (idx < 0 || idx >= toSend.length) continue;
+            if (writeOutput(toSend[idx], segs[idx])) {
+              done++;
+              saved++;
+            }
+          }
+          log(`✓ 批量${toSend.length}章完成 -> 保留${saved}章（${segs[keepIndices[0]]?.length || 0} 字）`);
+          return true;
+        }
+
+        // 配额墙？
+        if (await hitRateLimitChatGPT(page!)) {
+          const waitMs = boundedMs(cfg.rateLimitWaitMs, 30 * 60 * 1000);
+          log(`⚠ 批量撞配额墙，暂停 ${Math.ceil(waitMs / 60000)} 分钟…`);
+          await sleep(waitMs);
+          attempt--;
+          continue;
+        }
+
+        log(
+          `↻ 批量切分失败（期望${toSend.length}段，实际${segs ? '格式不对' : '未找到标记'}），重试 ${attempt}/${maxStuck}…`,
+        );
+      }
+      return false;
+    }
+
+    // DeepSeek 单章发送
+    async function sendSingleWithDeepSeek(outline: OutlineItem): Promise<'done' | 'failed' | 'policy_refusal'> {
+      const prompt = prefix ? `${prefix}\n\n${readOutline(outline)}` : readOutline(outline);
+      const maxStuck = Number(cfg.stuckRetries ?? 3);
+      const deepseekConfig = createDeepSeekConfig(cfg);
+
+      for (let attempt = 1; attempt <= maxStuck; attempt++) {
+        if (attempt > 1) {
+          log(`↻ ${outline.name}: 重试 ${attempt}/${maxStuck}…`);
+        }
+
+        let text: string;
+        let timedOut: boolean;
+
+        let deepseekResult;
+        try {
+          deepseekResult = await deepseek.sendAndCollect(prompt, deepseekConfig);
+          text = deepseekResult.text;
+          timedOut = deepseekResult.timedOut;
+        } catch (err) {
+          log(`✗ ${outline.name}: 发送失败 - ${errorMessage(err)}`);
+          continue;
+        }
+
+        if (deepseekResult.error) {
+          log(`✗ ${outline.name}: API 错误 - ${deepseekResult.error}`);
+          if (deepseek.hitRateLimit(deepseekResult)) {
+            const waitMs = boundedMs(cfg.rateLimitWaitMs, cfg.maxRateLimitWaitMs || 30 * 60 * 1000);
+            log(`⚠ 撞配额墙，暂停 ${Math.ceil(waitMs / 60000)} 分钟…`);
+            await sleep(waitMs);
+            attempt--;
+            continue;
+          }
+          continue;
+        }
+
+        if (isRefusal(text)) {
+          log(`✗ ${outline.name}: 被内容政策拒绝`);
+          failed++;
+          return 'policy_refusal';
+        }
+
+        if (usable(text)) {
+          if (writeOutput(outline, text)) {
+            done++;
+            log(`✓ ${outline.name} -> ${path.basename(outline.outputPath)}（${text.length} 字）`);
+          }
+          return 'done';
+        }
+
+        if (timedOut) {
+          log(`↻ ${outline.name}: 超时，重试…`);
+        } else {
+          log(`↻ ${outline.name}: 回复不可用，重试…`);
+        }
+      }
+
+      log(`✗ ${outline.name}: 重试耗尽`);
+      failed++;
+      return 'failed';
+    }
+
+    // DeepSeek 批量发送
+    async function sendBatchWithDeepSeek(toSend: OutlineItem[], keepIndices: number[]): Promise<boolean> {
+      const prompt = buildBatchPrompt(toSend, readOutline, prefix);
+      const maxStuck = Number(cfg.stuckRetries ?? 3);
+      const deepseekConfig = createDeepSeekConfig(cfg);
+
+      for (let attempt = 1; attempt <= maxStuck; attempt++) {
+        let text: string;
+        try {
+          const r = await deepseek.sendAndCollect(prompt, deepseekConfig);
+          text = r.text;
+
+          if (r.error) {
+            log(`↻ 批量发送失败: ${r.error}`);
+            if (deepseek.hitRateLimit(r)) {
+              const waitMs = boundedMs(cfg.rateLimitWaitMs, cfg.maxRateLimitWaitMs || 30 * 60 * 1000);
+              log(`⚠ 批量撞配额墙，暂停 ${Math.ceil(waitMs / 60000)} 分钟…`);
+              await sleep(waitMs);
+              attempt--;
+              continue;
+            }
+            continue;
+          }
+        } catch (err) {
+          log(`↻ 批量发送失败: ${errorMessage(err)}`);
+          continue;
+        }
+
+        if (isRefusal(text)) {
+          log(`↻ 批量(${toSend.length}章)被政策拒绝，转逐章…`);
+          return false;
+        }
+
+        const segs = splitBatch(text, toSend.length);
+        if (segs && segs.every(usable)) {
+          let saved = 0;
+          for (const idx of keepIndices) {
+            if (idx < 0 || idx >= toSend.length) continue;
+            if (writeOutput(toSend[idx], segs[idx])) {
+              done++;
+              saved++;
+            }
+          }
+          log(`✓ 批量${toSend.length}章完成 -> 保留${saved}章（${segs[keepIndices[0]]?.length || 0} 字）`);
+          return true;
+        }
+
+        log(
+          `↻ 批量切分失败（期望${toSend.length}段，实际${segs ? '格式不对' : '未找到标记'}），重试 ${attempt}/${maxStuck}…`,
+        );
+      }
+      return false;
+    }
+
+    // 逐本处理
+    for (const { novel, pending } of plan) {
+      if (attempted >= limit) break;
+      if (!pending.length) continue;
+
+      log(`开始小说: ${novel.name}（待处理 ${pending.length} 章）`);
+
+      // 按剧情线分组（快穿小说按"世界"分剧情线）
+      const arcs = groupByStoryArc(pending);
+      log(`剧情线分组：共 ${arcs.length} 条剧情线`);
+      for (const a of arcs) {
+        const pendingInArc = a.items.filter((o) => !isDone(o));
+        if (pendingInArc.length) {
+          log(`  [${a.arc}] ${a.items.length} 章（待处理 ${pendingInArc.length}）`);
+        }
+      }
+
+      // 每个剧情线开新对话处理
+      for (const { arc, items } of arcs) {
+        if (attempted >= limit) break;
+
+        // 过滤已完成的章节
+        const arcPending = items.filter((o) => !isDone(o));
+        if (!arcPending.length) continue;
+
+        log(`----- 剧情线: ${arc}（待处理 ${arcPending.length} 章）-----`);
+
+        // ChatGPT: 每个剧情线开新对话
+        if (cfg.aiProvider === 'chatgpt') {
+          await newConversation(page!, cfg);
+          log('已开新对话');
+        }
+        let conversationUrl: string | null = null;
+
+        // 超长剧情线分子批次（每批最多 batchSize 章）
+        const arcBatches = splitArcIntoBatches(arcPending, batchSize);
+        log(`子批次：共 ${arcBatches.length} 批（每批最多 ${batchSize} 章）`);
+
+        for (let bi = 0; bi < arcBatches.length; bi++) {
+          if (attempted >= limit) break;
+          // maxChapters 限制：如果剩余配额不够整个批次，只取前 remaining 章
+          const remaining = limit - attempted;
+          const batch = remaining < arcBatches[bi].length ? arcBatches[bi].slice(0, remaining) : arcBatches[bi];
+          log(`  子批次 ${bi + 1}/${arcBatches.length}：${batch.length} 章`);
+
+          // 根据 aiProvider 选择发送函数
+          const ok = cfg.aiProvider === 'chatgpt'
+            ? await sendBatchWithKeep(batch, batch.map((_, i) => i))
+            : await sendBatchWithDeepSeek(batch, batch.map((_, i) => i));
+
+          // ChatGPT: 捕获对话URL
+          if (cfg.aiProvider === 'chatgpt' && !conversationUrl) {
+            const curUrl = page!.url();
+            if (/\/c\//.test(curUrl)) {
+              conversationUrl = curUrl;
+              log(`  对话URL: ${conversationUrl}`);
+            }
+          }
+
+          if (!ok) {
+            // 批量失败，回退逐章（重试时用编辑上一条消息）
+            log(`  批量不成，回退逐章处理…`);
+            for (const o of batch) {
+              if (isDone(o)) continue;
+              if (attempted >= limit) break;
+              try {
+                // 根据 aiProvider 选择发送函数
+                const r = cfg.aiProvider === 'chatgpt'
+                  ? await sendSingle(o)
+                  : await sendSingleWithDeepSeek(o);
+                attempted++;
+                if (r === 'failed') {
+                  log(`  ⚠ ${o.name}: 逐章也失败，跳过`);
+                }
+                await sleep(cfg.betweenChaptersMs || 1000);
+              } catch (err) {
+                if (cfg.aiProvider === 'chatgpt' && isBrowserClosedError(err)) {
+                  try {
+                    page = await reconnectBrowser(conversationUrl);
+                    continue;
+                  } catch (reconnErr) {
+                    log(`FATAL 重连失败: ${errorMessage(reconnErr)}`);
+                    throw err;
+                  }
+                }
+                log(`  ✗ ${o.name}: ${errorMessage(err)}`);
+                failed++;
+                attempted++;
+              }
+            }
+          } else {
+            attempted += batch.length;
+            await sleep(cfg.betweenChaptersMs || 1000);
+          }
+        }
+
+        log(`----- 剧情线 ${arc} 完成 -----`);
+      }
+
+      log(`========== ${novel.name} 本轮结束 ==========`);
+
+      // ChatGPT: 删除对话
+      if (cfg.aiProvider === 'chatgpt' && cfg.deleteConversationAfterDone) {
+        try {
+          await deleteCurrentConversation(page!);
+        } catch {
+          /* 忽略 */
+        }
       }
     }
-  }
 
-  log(`全部结束。成功 ${done}，失败 ${failed}。`);
-  return {
-    pending: pendingOutlines - done,
-    total: totalOutlines,
-    novels: totalNovels,
-    done,
-    failed,
-  };
+    log(`全部结束。成功 ${done}，失败 ${failed}。`);
+    return {
+      pending: pendingOutlines - done,
+      total: totalOutlines,
+      novels: totalNovels,
+      done,
+      failed,
+    };
   } finally {
     releaseLock(lock);
   }

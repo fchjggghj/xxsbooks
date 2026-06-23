@@ -33,6 +33,23 @@ export function validateBaseConfig(cfg: Partial<BaseConfig>): string[] {
   if (cfg.stuckRetries !== undefined && cfg.stuckRetries < 1) errors.push('stuckRetries 必须 >= 1');
   if (cfg.minOutputChars !== undefined && cfg.minOutputChars < 100)
     errors.push('minOutputChars 必须 >= 100');
+
+  if (cfg.aiProvider && !['chatgpt', 'deepseek'].includes(cfg.aiProvider)) {
+    errors.push('aiProvider 必须是 chatgpt 或 deepseek');
+  }
+
+  if (cfg.aiProvider === 'deepseek') {
+    if (!cfg.deepseekApiKey || cfg.deepseekApiKey.includes('在这里填')) {
+      errors.push('使用 deepseek 时必须配置 deepseekApiKey');
+    }
+    if (cfg.deepseekTemperature !== undefined && (cfg.deepseekTemperature < 0 || cfg.deepseekTemperature > 1)) {
+      errors.push('deepseekTemperature 必须在 0-1 之间');
+    }
+    if (cfg.deepseekMaxTokens !== undefined && cfg.deepseekMaxTokens < 100) {
+      errors.push('deepseekMaxTokens 必须 >= 100');
+    }
+  }
+
   return errors;
 }
 

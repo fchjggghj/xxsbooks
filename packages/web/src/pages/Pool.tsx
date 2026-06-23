@@ -1,5 +1,11 @@
 import { useState, useEffect } from 'react';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { useToast } from '@/hooks/useToast';
 import { apiGet, apiPost, apiPut, apiDelete, type OutlinePoolItem, type PoolItemsResponse, type GenresResponse } from '../lib/api';
+import { Search, RefreshCw, Edit2, Trash2, X, BookOpen, Star, Tag, BarChart3 } from 'lucide-react';
 
 export default function Pool() {
   const [items, setItems] = useState<OutlinePoolItem[]>([]);
@@ -9,6 +15,7 @@ export default function Pool() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingItem, setEditingItem] = useState<OutlinePoolItem | null>(null);
   const [loading, setLoading] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     fetchItems();
@@ -23,7 +30,7 @@ export default function Pool() {
       const res = await apiGet<PoolItemsResponse>(`/pool?${params.toString()}`);
       setItems(res.items || []);
     } catch (err) {
-      console.error('获取大纲池失败:', err);
+      toast.error(String(err));
     } finally {
       setLoading(false);
     }
@@ -34,17 +41,18 @@ export default function Pool() {
       const res = await apiGet<GenresResponse>('/pool/genres');
       setGenres(res.genres || []);
     } catch (err) {
-      console.error('获取题材列表失败:', err);
+      toast.error(String(err));
     }
   }
 
   async function handleBatchSync() {
     try {
       await apiPost<{ count: number }>('/pool/batch');
+      toast.success('批量同步完成');
       fetchItems();
       fetchGenres();
     } catch (err) {
-      console.error('批量同步失败:', err);
+      toast.error(String(err));
     }
   }
 
@@ -57,11 +65,12 @@ export default function Pool() {
     if (!editingItem) return;
     try {
       await apiPut<OutlinePoolItem>(`/pool/${editingItem.id}`, editingItem);
+      toast.success('保存成功');
       setShowEditModal(false);
       fetchItems();
       fetchGenres();
     } catch (err) {
-      console.error('保存失败:', err);
+      toast.error(String(err));
     }
   }
 
@@ -69,10 +78,11 @@ export default function Pool() {
     if (!confirm('确定删除该大纲池项？')) return;
     try {
       await apiDelete(`/pool/${itemId}`);
+      toast.success('删除成功');
       fetchItems();
       fetchGenres();
     } catch (err) {
-      console.error('删除失败:', err);
+      toast.error(String(err));
     }
   }
 
@@ -85,9 +95,9 @@ export default function Pool() {
   });
 
   const qualityColor = (quality: number) => {
-    if (quality >= 5) return 'bg-green-100 text-green-800';
-    if (quality >= 4) return 'bg-yellow-100 text-yellow-800';
-    return 'bg-red-100 text-red-800';
+    if (quality >= 5) return 'bg-ok/15 text-ok';
+    if (quality >= 4) return 'bg-warn/15 text-warn';
+    return 'bg-fail/15 text-fail';
   };
 
   const qualityLabel = (quality: number) => {
@@ -112,28 +122,26 @@ export default function Pool() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">大纲池管理</h1>
-          <p className="text-gray-500 mt-1">管理改编后的大纲，按题材分类存储</p>
+          <span className="block text-[11px] font-bold uppercase tracking-[1.6px] text-muted">Outline Pool</span>
+          <h1 className="mt-0.5 text-[18px] font-bold">大纲池管理</h1>
         </div>
-        <button
-          onClick={handleBatchSync}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
+        <Button onClick={handleBatchSync} disabled={loading}>
+          <RefreshCw className="mr-2 h-4 w-4" />
           批量同步
-        </button>
+        </Button>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm p-4">
+      <Card className="p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">选择题材</label>
+            <label className="block text-xs text-muted mb-1.5">选择题材</label>
             <select
               value={selectedGenre}
               onChange={(e) => setSelectedGenre(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="w-full h-9 rounded-md border border-white/[0.1] bg-surface-2 px-3 text-sm text-txt focus:outline-none focus:ring-2 focus:ring-accent/40"
             >
               <option value="">全部题材</option>
               {genres.map((genre) => (
@@ -144,123 +152,158 @@ export default function Pool() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">搜索</label>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索大纲名称或题材..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            />
+            <label className="block text-xs text-muted mb-1.5">搜索</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索大纲名称或题材..."
+                className="pl-9"
+              />
+            </div>
           </div>
         </div>
-      </div>
+      </Card>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl shadow-sm p-4">
-          <div className="text-gray-500 text-sm">总大纲数</div>
-          <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm p-4">
-          <div className="text-gray-500 text-sm">题材数量</div>
-          <div className="text-2xl font-bold text-blue-600">{genres.length}</div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm p-4">
-          <div className="text-gray-500 text-sm">总字数</div>
-          <div className="text-2xl font-bold text-green-600">{stats.totalWords}</div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm p-4">
-          <div className="text-gray-500 text-sm">平均质量</div>
-          <div className={`text-2xl font-bold ${qualityColor(stats.avgQuality)} inline-block px-2 rounded`}>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Card className="p-3 border-glow">
+          <div className="flex items-center gap-2 mb-1">
+            <BarChart3 className="h-4 w-4 text-accent-2" />
+            <span className="text-xs text-muted">总大纲数</span>
+          </div>
+          <div className="text-2xl font-bold text-gradient">{stats.total}</div>
+        </Card>
+        <Card className="p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <Tag className="h-4 w-4 text-cyan" />
+            <span className="text-xs text-muted">题材数量</span>
+          </div>
+          <div className="text-2xl font-bold text-cyan">{genres.length}</div>
+        </Card>
+        <Card className="p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <BookOpen className="h-4 w-4 text-ok" />
+            <span className="text-xs text-muted">总字数</span>
+          </div>
+          <div className="text-2xl font-bold text-ok">{stats.totalWords}</div>
+        </Card>
+        <Card className="p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <Star className="h-4 w-4 text-warn" />
+            <span className="text-xs text-muted">平均质量</span>
+          </div>
+          <div className={`text-2xl font-bold ${qualityColor(stats.avgQuality)}`}>
             {stats.avgQuality}/5
           </div>
-        </div>
+        </Card>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm p-4">
+      <Card className="p-4">
         <div className="flex flex-wrap gap-2">
-          <span className="text-sm font-medium text-gray-700">来源书籍：</span>
+          <span className="text-sm font-medium text-muted">来源书籍：</span>
           {Object.entries(stats.bySource).map(([bookId, count]) => (
-            <span key={bookId} className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+            <Badge key={bookId} variant="outline" className="text-[11px]">
               {bookId}: {count}
-            </span>
+            </Badge>
           ))}
         </div>
-      </div>
+      </Card>
 
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
+      <Card className="overflow-hidden">
+        <div className="overflow-auto rounded-2xl">
+          <table className="w-full min-w-[720px] border-collapse text-[13px]">
+            <thead>
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">大纲名称</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">题材</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">来源</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">字数</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">质量</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">添加时间</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  大纲名称
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  题材
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  来源
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  字数
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  质量
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  状态
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  添加时间
+                </th>
+                <th className="sticky top-0 z-[2] border-b border-white/[0.06] bg-surface-2/95 px-3 py-2.5 text-left text-xs font-bold tracking-tight text-muted backdrop-blur-sm">
+                  操作
+                </th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
-                    加载中...
+                  <td colSpan={8} className="py-5 text-center text-muted">
+                    加载中…
                   </td>
                 </tr>
               ) : filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={8} className="py-5 text-center text-muted">
                     暂无大纲池数据
                   </td>
                 </tr>
               ) : (
                 filteredItems.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-sm font-medium text-gray-900">{item.outlineName}</span>
+                  <tr
+                    key={item.id}
+                    className="border-b border-white/[0.05] transition-colors hover:bg-surface-3/60"
+                  >
+                    <td className="px-3 py-2.5">
+                      <span className="text-sm font-medium text-txt">{item.outlineName}</span>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    <td className="px-3 py-2.5">
+                      <Badge className="bg-accent/15 text-accent-2">
                         {item.genre}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    <td className="px-3 py-2.5">
+                      <Badge variant="outline" className="font-mono">
                         {item.bookId}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-3 py-2.5 text-sm text-muted tabular-nums">
                       {item.wordCount} 字
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${qualityColor(item.quality)}`}>
+                    <td className="px-3 py-2.5">
+                      <Badge className={qualityColor(item.quality)}>
                         {qualityLabel(item.quality)} ({item.quality}/5)
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${item.adapted ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                    <td className="px-3 py-2.5">
+                      <Badge className={item.adapted ? 'bg-ok/15 text-ok' : 'bg-surface-3 text-muted'}>
                         {item.adapted ? '已改编' : '待改编'}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-3 py-2.5 text-sm text-muted">
                       {new Date(item.createdAt).toLocaleDateString()}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-1">
                         <button
                           onClick={() => handleEdit(item)}
-                          className="text-blue-600 hover:text-blue-900 text-sm"
+                          className="rounded p-1 text-muted transition-colors hover:text-txt"
+                          title="编辑"
                         >
-                          编辑
+                          <Edit2 className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(item.id)}
-                          className="text-red-600 hover:text-red-900 text-sm"
+                          className="rounded p-1 text-muted transition-colors hover:text-rose-400"
+                          title="删除"
                         >
-                          删除
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </td>
@@ -270,47 +313,50 @@ export default function Pool() {
             </tbody>
           </table>
         </div>
-      </div>
+      </Card>
 
       {showEditModal && editingItem && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold">编辑大纲池项</h2>
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-5 backdrop-blur-md"
+          onClick={() => setShowEditModal(false)}
+        >
+          <div
+            className="flex w-[min(600px,94vw)] flex-col rounded-2xl border border-white/[0.1] bg-surface-2 shadow-[0_24px_60px_-28px_rgba(0,0,0,0.8)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 border-b border-white/[0.06] px-4.5 py-3.5">
+              <Edit2 className="h-5 w-5" />
+              <strong className="text-[15px]">编辑大纲池项</strong>
               <button
+                className="ml-auto text-muted transition-colors hover:text-txt"
                 onClick={() => setShowEditModal(false)}
-                className="text-gray-500 hover:text-gray-700"
               >
-                ✕
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-5 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">大纲名称</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs text-muted mb-1">大纲名称</label>
+                  <Input
                     value={editingItem.outlineName}
                     onChange={(e) => setEditingItem({ ...editingItem, outlineName: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">来源书籍ID</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs text-muted mb-1">来源书籍ID</label>
+                  <Input
                     value={editingItem.bookId}
                     onChange={(e) => setEditingItem({ ...editingItem, bookId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">题材</label>
+                <label className="block text-xs text-muted mb-1">题材</label>
                 <select
                   value={editingItem.genre}
                   onChange={(e) => setEditingItem({ ...editingItem, genre: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  className="w-full h-9 rounded-md border border-white/[0.1] bg-surface-3 px-3 text-sm text-txt focus:outline-none focus:ring-2 focus:ring-accent/40"
                 >
                   {genres.map((genre) => (
                     <option key={genre} value={genre}>{genre}</option>
@@ -319,40 +365,30 @@ export default function Pool() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">质量评分 (1-5)</label>
-                  <input
+                  <label className="block text-xs text-muted mb-1">质量评分 (1-5)</label>
+                  <Input
                     type="number"
                     min={1}
                     max={5}
                     value={editingItem.quality}
                     onChange={(e) => setEditingItem({ ...editingItem, quality: Number(e.target.value) })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">字数</label>
-                  <input
+                  <label className="block text-xs text-muted mb-1">字数</label>
+                  <Input
                     type="number"
                     value={editingItem.wordCount}
                     onChange={(e) => setEditingItem({ ...editingItem, wordCount: Number(e.target.value) })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
               </div>
             </div>
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t">
-              <button
-                onClick={() => setShowEditModal(false)}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-              >
+            <div className="flex justify-end gap-2 pt-2 border-t border-white/[0.06] px-4.5 py-3.5">
+              <Button variant="outline" onClick={() => setShowEditModal(false)}>
                 取消
-              </button>
-              <button
-                onClick={handleSave}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                保存
-              </button>
+              </Button>
+              <Button onClick={handleSave}>保存</Button>
             </div>
           </div>
         </div>

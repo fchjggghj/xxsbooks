@@ -25,6 +25,7 @@ import {
   type OutlineItem,
   type Novel,
   type RateLimitInfo,
+  type DeepSeekConfig,
   // 工具
   errorMessage,
   isBrowserClosedError,
@@ -39,10 +40,14 @@ import {
   // chatgpt
   getPages,
   newConversation,
-  sendAndCollect,
-  hitRateLimit,
-  rateLimitInfo,
+  sendAndCollect as sendAndCollectChatGPT,
+  hitRateLimit as hitRateLimitChatGPT,
+  rateLimitInfo as rateLimitInfoChatGPT,
   deleteCurrentConversation,
+  // deepseek
+  sendAndCollectDeepSeek,
+  hitRateLimitDeepSeek,
+  rateLimitInfoDeepSeek,
 } from '@novel-pipeline/shared';
 import { buildBatchPrompt, splitBatch } from './batch-utils.js';
 import { createFileLogger, acquireLock, releaseLock } from './runner-core.js';
@@ -66,6 +71,19 @@ function cfgNum(cfg: OutlineConfig, key: string, fallback: number): number {
   const v = (cfg as unknown as Record<string, unknown>)[key];
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function createDeepSeekConfig(cfg: OutlineConfig): DeepSeekConfig {
+  return {
+    apiKey: cfg.deepseekApiKey,
+    baseUrl: cfg.deepseekBaseUrl || undefined,
+    model: cfg.deepseekModel || undefined,
+    temperature: cfg.deepseekTemperature || undefined,
+    maxTokens: cfg.deepseekMaxTokens || undefined,
+    timeoutMs: cfg.waitReplyTimeoutMs || undefined,
+    rateLimitWaitMs: cfg.rateLimitWaitMs || undefined,
+    maxRateLimitWaitMs: cfg.maxRateLimitWaitMs || undefined,
+  };
 }
 
 // ---------- 配置加载 ----------
@@ -576,8 +594,14 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
 
   if (dryRun) {
     console.log('\n[dry-run] 仅规划，未开浏览器、未写任何文件。');
-    if (!cfg.gptUrl || cfg.gptUrl.includes('在这里填')) {
-      console.log('[dry-run] 提醒：config.json 里的 gptUrl 还没填你的自定义 GPT 链接。');
+    if (cfg.aiProvider === 'chatgpt') {
+      if (!cfg.gptUrl || cfg.gptUrl.includes('在这里填')) {
+        console.log('[dry-run] 提醒：config.json 里的 gptUrl 还没填你的自定义 GPT 链接。');
+      }
+    } else {
+      if (!cfg.deepseekApiKey || cfg.deepseekApiKey.includes('在这里填')) {
+        console.log('[dry-run] 提醒：config.json 里的 deepseekApiKey 还没填。');
+      }
     }
     return {
       pending: pendingChapters,
@@ -588,8 +612,14 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
     };
   }
 
-  if (!cfg.gptUrl || cfg.gptUrl.includes('在这里填')) {
-    throw new Error('请先在 config.json 填入你的自定义 GPT 链接 gptUrl');
+  if (cfg.aiProvider === 'chatgpt') {
+    if (!cfg.gptUrl || cfg.gptUrl.includes('在这里填')) {
+      throw new Error('请先在 config.json 填入你的自定义 GPT 链接 gptUrl');
+    }
+  } else {
+    if (!cfg.deepseekApiKey || cfg.deepseekApiKey.includes('在这里填')) {
+      throw new Error('请先在 config.json 填入你的 DeepSeek API Key（deepseekApiKey）');
+    }
   }
   if (!pendingChapters) {
     log('没有待处理章节，全部已完成。');
@@ -627,13 +657,21 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
     for (const ch of pending) flat.push({ ch, novelName: novel.name });
   }
 
-  // 连接浏览器
+  // 连接浏览器（仅 chatgpt 需要）
   const workers = Math.min(concurrency, flat.length);
-  log(
-    `连接 Chrome（CDP），准备 ${workers} 个标签页…（每批 ${batchSize} 章合 1 个请求；配置支持热更新，改 config.json 随时生效）`,
-  );
-  const { pages } = await getPages(cfg, workers);
-  log(`已就绪 ${pages.length} 个标签页`);
+  let pages: Page[] = [];
+  if (cfg.aiProvider === 'chatgpt') {
+    log(
+      `连接 Chrome（CDP），准备 ${workers} 个标签页…（每批 ${batchSize} 章合 1 个请求；配置支持热更新，改 config.json 随时生效）`,
+    );
+    const result = await getPages(cfg, workers);
+    pages = result.pages;
+    log(`已就绪 ${pages.length} 个标签页`);
+  } else {
+    log(
+      `使用 DeepSeek API，准备 ${workers} 个工作线程…（每批 ${batchSize} 章合 1 个请求；配置支持热更新，改 config.json 随时生效）`,
+    );
+  }
 
   // 配额墙恢复
   async function waitForRateLimitRecovery(
@@ -643,7 +681,7 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
   ): Promise<number> {
     let info: RateLimitInfo = { hit: true };
     try {
-      info = await rateLimitInfo(page);
+      info = await rateLimitInfoChatGPT(page);
     } catch {
       /* 忽略 */
     }
@@ -675,7 +713,7 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
   let consecutiveSoftFailures = 0;
 
   // 连续失败智能暂停
-  async function maybePauseAfterFailure(page: Page, c: OutlineConfig, label = ''): Promise<void> {
+  async function maybePauseAfterFailure(page: Page | undefined, c: OutlineConfig, label = ''): Promise<void> {
     const cap = Number(c.maxConsecutiveFailures ?? 3);
     if (!cap || cap <= 0 || consecutiveSoftFailures < cap) return;
     const waitMs = boundedMs(c.failurePauseMs, 5 * 60 * 1000);
@@ -683,7 +721,9 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
       `⚠ 连续失败 ${consecutiveSoftFailures} 次，智能暂停 ${Math.ceil(waitMs / 60000)} 分钟后继续${label ? `（${label}）` : ''}`,
     );
     await sleep(waitMs);
-    await newConversation(page, c);
+    if (page) {
+      await newConversation(page, c);
+    }
     consecutiveSoftFailures = 0;
   }
 
@@ -747,7 +787,7 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
     const minChars = Number(c.minOutputChars ?? 300);
     const usable = (s: string) => isUsable(s, minChars);
     const prompt = (c.promptTemplate || '{content}').replace('{content}', readChapter(ch));
-    const { text, timedOut } = await sendAndCollect(page, prompt, c);
+    const { text, timedOut } = await sendAndCollectChatGPT(page, prompt, c);
     if (isRefusal(text)) {
       markSkipped(
         ch,
@@ -761,9 +801,9 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
       saveOutput(ch, text, '（单章兜底）');
       return 'done';
     }
-    if (await hitRateLimit(page)) {
+    if (await hitRateLimitChatGPT(page)) {
       await waitForRateLimitRecovery(page, c, `处理 ${ch.name} 时达到上限`);
-      const r = await sendAndCollect(page, prompt, c);
+      const r = await sendAndCollectChatGPT(page, prompt, c);
       if (isRefusal(r.text)) {
         markSkipped(
           ch,
@@ -781,7 +821,7 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
     const maxStuck = Number(c.stuckRetries ?? 3);
     for (let s = 1; s <= maxStuck; s++) {
       await newConversation(page, c);
-      const r = await sendAndCollect(page, prompt, c);
+      const r = await sendAndCollectChatGPT(page, prompt, c);
       if (isRefusal(r.text)) {
         markSkipped(
           ch,
@@ -806,9 +846,214 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
     return 'failed';
   }
 
+  async function sendSingleWithDeepSeek(
+    ch: OutlineItem,
+    c: OutlineConfig,
+  ): Promise<'done' | 'failed' | 'policy_refusal'> {
+    const minChars = Number(c.minOutputChars ?? 300);
+    const usable = (s: string) => isUsable(s, minChars);
+    const prompt = (c.promptTemplate || '{content}').replace('{content}', readChapter(ch));
+    const deepseekConfig = createDeepSeekConfig(c);
+    const { text, timedOut, error } = await sendAndCollectDeepSeek(prompt, deepseekConfig);
+    if (isRefusal(text)) {
+      markSkipped(
+        ch,
+        'policy_refusal',
+        { responsePreview: String(text || '').slice(0, 300) },
+        `✗ ${ch.name}: 被内容政策拒绝，已写跳过标记`,
+      );
+      return 'policy_refusal';
+    }
+    if (usable(text)) {
+      saveOutput(ch, text, '（单章兜底）');
+      return 'done';
+    }
+    if (hitRateLimitDeepSeek({ text: '', timedOut: false, error })) {
+      const info = rateLimitInfoDeepSeek({ text: '', timedOut: false, error });
+      const fallback = boundedMs(c.rateLimitWaitMs, 30 * 60 * 1000);
+      const maxWait = boundedMs(c.maxRateLimitWaitMs, 2 * 60 * 60 * 1000);
+      const waitMs = boundedMs(info?.waitMs, fallback, maxWait);
+      log(
+        `⚠ 处理 ${ch.name} 时达到上限，暂停约 ${Math.ceil(waitMs / 60000)} 分钟后重试`,
+      );
+      await sleep(waitMs);
+      const r = await sendAndCollectDeepSeek(prompt, deepseekConfig);
+      if (isRefusal(r.text)) {
+        markSkipped(
+          ch,
+          'policy_refusal',
+          { responsePreview: String(r.text || '').slice(0, 300) },
+          `✗ ${ch.name}: 配额恢复后被内容政策拒绝，已写跳过标记`,
+        );
+        return 'policy_refusal';
+      }
+      if (usable(r.text)) {
+        saveOutput(ch, r.text, '（配额恢复后单章）');
+        return 'done';
+      }
+    }
+    const maxStuck = Number(c.stuckRetries ?? 3);
+    for (let s = 1; s <= maxStuck; s++) {
+      const r = await sendAndCollectDeepSeek(prompt, deepseekConfig);
+      if (isRefusal(r.text)) {
+        markSkipped(
+          ch,
+          'policy_refusal',
+          { retry: s },
+          `✗ ${ch.name}: 重试仍被政策拒绝，已写跳过标记`,
+        );
+        return 'policy_refusal';
+      }
+      if (usable(r.text)) {
+        saveOutput(ch, r.text, `（单章刷新重试第${s}次）`);
+        return 'done';
+      }
+    }
+    markSkipped(
+      ch,
+      'no_valid_reply',
+      { timedOut, minChars, error },
+      `✗ ${ch.name}: 没拿到有效回复${timedOut ? '（超时）' : ''}${error ? `（${error}）` : ''}，已写跳过标记`,
+    );
+    consecutiveSoftFailures++;
+    return 'failed';
+  }
+
+  async function processBatchWithChatGPT(
+    wi: number,
+    page: Page,
+    chs: OutlineItem[],
+    c: OutlineConfig,
+    batch: { novelName: string; items: OutlineItem[] },
+  ): Promise<boolean> {
+    const minChars = Number(c.minOutputChars ?? 300);
+    const usable = (s: string) => isUsable(s, minChars);
+    let resetConversationAfterBatch = false;
+
+    if (chs.length === 1) {
+      const result = await sendSingle(page, chs[0], c);
+      if (result === 'done') {
+        resetConversationAfterBatch = await cleanupConversation(page, c, chs[0].name);
+      }
+      if (result === 'failed') await maybePauseAfterFailure(page, c, chs[0].name);
+    } else {
+      const prompt = buildBatchPrompt(chs, readChapter);
+      const maxStuck = Number(c.stuckRetries ?? 3);
+      let okBatch = false;
+      for (let attempt = 1; attempt <= maxStuck && !okBatch; attempt++) {
+        const { text } = await sendAndCollectChatGPT(page, prompt, c);
+        if (isRefusal(text)) {
+          log(`↻ [W${wi}] 批量(${chs.length}章)被政策拒绝，转逐章兜底…`);
+          break;
+        }
+        const segs = splitBatch(text, chs.length);
+        if (segs && segs.every(usable)) {
+          for (let i = 0; i < chs.length; i++) {
+            saveOutput(chs[i], segs[i], `（批量 ${chs.length} 章/请求）`);
+          }
+          okBatch = true;
+          resetConversationAfterBatch = await cleanupConversation(
+            page,
+            c,
+            `${chs.length} 章批量`,
+          );
+        } else if (await hitRateLimitChatGPT(page)) {
+          await waitForRateLimitRecovery(page, c, `[W${wi}] 批量达到上限`);
+          return false;
+        } else {
+          log(
+            `↻ [W${wi}] 批量切分失败（标记数对不上或某段太短），刷新重试 ${attempt}/${maxStuck}…`,
+          );
+          await newConversation(page, c);
+          return false;
+        }
+      }
+      if (!okBatch) {
+        log(`[W${wi}] 批量多次不成，回退逐章处理这 ${chs.length} 章（保证不写错位）…`);
+        await newConversation(page, c);
+        for (let ci = 0; ci < chs.length; ci++) {
+          const ch = chs[ci];
+          if (!isDone(ch, c)) {
+            const result = await sendSingle(page, ch, c);
+            if (result === 'done') {
+              const cleaned = await cleanupConversation(page, c, ch.name);
+              resetConversationAfterBatch = cleaned || resetConversationAfterBatch;
+              if (cleaned && ci < chs.length - 1) {
+                await newConversation(page, c);
+              }
+            }
+            if (result === 'failed') await maybePauseAfterFailure(page, c, ch.name);
+          }
+        }
+      }
+    }
+
+    return resetConversationAfterBatch;
+  }
+
+  async function processBatchWithDeepSeek(
+    wi: number,
+    chs: OutlineItem[],
+    c: OutlineConfig,
+  ): Promise<void> {
+    const minChars = Number(c.minOutputChars ?? 300);
+    const usable = (s: string) => isUsable(s, minChars);
+
+    if (chs.length === 1) {
+      const result = await sendSingleWithDeepSeek(chs[0], c);
+      if (result === 'failed') await maybePauseAfterFailure(undefined, c, chs[0].name);
+    } else {
+      const prompt = buildBatchPrompt(chs, readChapter);
+      const maxStuck = Number(c.stuckRetries ?? 3);
+      const deepseekConfig = createDeepSeekConfig(c);
+      let okBatch = false;
+
+      for (let attempt = 1; attempt <= maxStuck && !okBatch; attempt++) {
+        const { text, error } = await sendAndCollectDeepSeek(prompt, deepseekConfig);
+        if (isRefusal(text)) {
+          log(`↻ [W${wi}] 批量(${chs.length}章)被政策拒绝，转逐章兜底…`);
+          break;
+        }
+        if (hitRateLimitDeepSeek({ text: '', timedOut: false, error })) {
+          const info = rateLimitInfoDeepSeek({ text: '', timedOut: false, error });
+          const fallback = boundedMs(c.rateLimitWaitMs, 30 * 60 * 1000);
+          const maxWait = boundedMs(c.maxRateLimitWaitMs, 2 * 60 * 60 * 1000);
+          const waitMs = boundedMs(info?.waitMs, fallback, maxWait);
+          log(
+            `⚠ [W${wi}] 批量达到上限，暂停约 ${Math.ceil(waitMs / 60000)} 分钟后重试`,
+          );
+          await sleep(waitMs);
+          continue;
+        }
+        const segs = splitBatch(text, chs.length);
+        if (segs && segs.every(usable)) {
+          for (let i = 0; i < chs.length; i++) {
+            saveOutput(chs[i], segs[i], `（批量 ${chs.length} 章/请求）`);
+          }
+          okBatch = true;
+        } else {
+          log(
+            `↻ [W${wi}] 批量切分失败（标记数对不上或某段太短），刷新重试 ${attempt}/${maxStuck}…`,
+          );
+        }
+      }
+
+      if (!okBatch) {
+        log(`[W${wi}] 批量多次不成，回退逐章处理这 ${chs.length} 章（保证不写错位）…`);
+        for (let ci = 0; ci < chs.length; ci++) {
+          const ch = chs[ci];
+          if (!isDone(ch, c)) {
+            const result = await sendSingleWithDeepSeek(ch, c);
+            if (result === 'failed') await maybePauseAfterFailure(undefined, c, ch.name);
+          }
+        }
+      }
+    }
+  }
+
   // 工作线程：每批前热读配置 → 取一批 → 发送/切分落盘
-  async function worker(wi: number, page: Page): Promise<void> {
-    await sleep(wi * 1500); // 错峰启动
+  async function worker(wi: number, page?: Page): Promise<void> {
+    await sleep(wi * 1500);
     let countInConv = 0;
     let convReady = false;
 
@@ -819,10 +1064,6 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
       const batch = nextBatch(size);
       if (!batch) break;
 
-      const minChars = Number(c.minOutputChars ?? 300);
-      const usable = (s: string) => isUsable(s, minChars);
-
-      // 逐章加锁，过滤掉已完成/被别的标签页占用的
       const claims: ClaimResult[] = [];
       const chs: OutlineItem[] = [];
       for (const ch of batch.items) {
@@ -840,124 +1081,81 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
           loggedBooks.add(batch.novelName);
           log(`========== 开始小说: ${batch.novelName} ==========`);
         }
-        if (!convReady || countInConv >= cfgNum(c, 'chaptersPerConversation', 100)) {
-          await newConversation(page, c);
-          countInConv = 0;
-          convReady = true;
-        }
 
-        let resetConversationAfterBatch = false;
-        try {
-          if (chs.length === 1) {
-            const result = await sendSingle(page, chs[0], c);
-            if (result === 'done') {
-              resetConversationAfterBatch = await cleanupConversation(page, c, chs[0].name);
+        if (c.aiProvider === 'chatgpt') {
+          if (!page) throw new Error('page is required for chatgpt');
+          if (!convReady || countInConv >= cfgNum(c, 'chaptersPerConversation', 100)) {
+            await newConversation(page, c);
+            countInConv = 0;
+            convReady = true;
+          }
+
+          let resetConversationAfterBatch = false;
+          try {
+            resetConversationAfterBatch = await processBatchWithChatGPT(
+              wi,
+              page,
+              chs,
+              c,
+              batch,
+            );
+          } catch (err) {
+            if (isBrowserClosedError(err)) {
+              log(`FATAL [W${wi}] browser/page closed; 中止本轮以便守护重启 Chrome 续跑。`);
+              fatal = err as Error;
+              break;
             }
-            if (result === 'failed') await maybePauseAfterFailure(page, c, chs[0].name);
-          } else {
-            const prompt = buildBatchPrompt(chs, readChapter);
-            const maxStuck = Number(c.stuckRetries ?? 3);
-            let okBatch = false;
-            for (let attempt = 1; attempt <= maxStuck && !okBatch; attempt++) {
-              const { text } = await sendAndCollect(page, prompt, c);
-              if (isRefusal(text)) {
-                log(`↻ [W${wi}] 批量(${chs.length}章)被政策拒绝，转逐章兜底…`);
-                break;
-              }
-              const segs = splitBatch(text, chs.length);
-              if (segs && segs.every(usable)) {
-                for (let i = 0; i < chs.length; i++) {
-                  saveOutput(chs[i], segs[i], `（批量 ${chs.length} 章/请求）`);
-                }
-                okBatch = true;
-                resetConversationAfterBatch = await cleanupConversation(
-                  page,
-                  c,
-                  `${chs.length} 章批量`,
-                );
-              } else if (await hitRateLimit(page)) {
-                await waitForRateLimitRecovery(page, c, `[W${wi}] 批量达到上限`);
-                countInConv = 0;
-              } else {
-                log(
-                  `↻ [W${wi}] 批量切分失败（标记数对不上或某段太短），刷新重试 ${attempt}/${maxStuck}…`,
-                );
+            if (isTransientPageError(err)) {
+              log(`Transient page error: ${errorMessage(err)}; 重开对话后回退逐章重试。`);
+              try {
                 await newConversation(page, c);
                 countInConv = 0;
-              }
-            }
-            if (!okBatch) {
-              log(`[W${wi}] 批量多次不成，回退逐章处理这 ${chs.length} 章（保证不写错位）…`);
-              await newConversation(page, c);
-              countInConv = 0;
-              for (let ci = 0; ci < chs.length; ci++) {
-                const ch = chs[ci];
-                if (!isDone(ch, c)) {
-                  const result = await sendSingle(page, ch, c);
-                  if (result === 'done') {
-                    const cleaned = await cleanupConversation(page, c, ch.name);
-                    resetConversationAfterBatch = cleaned || resetConversationAfterBatch;
-                    if (cleaned && ci < chs.length - 1) {
-                      await newConversation(page, c);
-                      countInConv = 0;
+                for (let ci = 0; ci < chs.length; ci++) {
+                  const ch = chs[ci];
+                  if (!isDone(ch, c)) {
+                    const result = await sendSingle(page, ch, c);
+                    if (result === 'done') {
+                      await cleanupConversation(page, c, ch.name);
                     }
+                    if (result === 'failed') await maybePauseAfterFailure(page, c, ch.name);
                   }
-                  if (result === 'failed') await maybePauseAfterFailure(page, c, ch.name);
                 }
-              }
-            }
-          }
-        } catch (err) {
-          if (isBrowserClosedError(err)) {
-            log(`FATAL [W${wi}] browser/page closed; 中止本轮以便守护重启 Chrome 续跑。`);
-            fatal = err as Error;
-            break;
-          }
-          if (isTransientPageError(err)) {
-            log(`Transient page error: ${errorMessage(err)}; 重开对话后回退逐章重试。`);
-            try {
-              await newConversation(page, c);
-              countInConv = 0;
-              for (let ci = 0; ci < chs.length; ci++) {
-                const ch = chs[ci];
-                if (!isDone(ch, c)) {
-                  const result = await sendSingle(page, ch, c);
-                  if (result === 'done') {
-                    const cleaned = await cleanupConversation(page, c, ch.name);
-                    resetConversationAfterBatch = cleaned || resetConversationAfterBatch;
-                    if (cleaned && ci < chs.length - 1) {
-                      await newConversation(page, c);
-                      countInConv = 0;
-                    }
-                  }
-                  if (result === 'failed') await maybePauseAfterFailure(page, c, ch.name);
+              } catch (retryErr) {
+                if (isBrowserClosedError(retryErr)) {
+                  log(`FATAL [W${wi}] browser/page closed while retrying; 中止。`);
+                  fatal = retryErr as Error;
+                  break;
                 }
+                failed += chs.length;
+                consecutiveSoftFailures += chs.length;
+                await maybePauseAfterFailure(page, c, `W${wi} 重试失败`);
+                log(`✗ 批次失败: ${errorMessage(retryErr)}`);
               }
-            } catch (retryErr) {
-              if (isBrowserClosedError(retryErr)) {
-                log(`FATAL [W${wi}] browser/page closed while retrying; 中止。`);
-                fatal = retryErr as Error;
-                break;
-              }
+            } else {
               failed += chs.length;
               consecutiveSoftFailures += chs.length;
-              await maybePauseAfterFailure(page, c, `W${wi} 重试失败`);
-              log(`✗ 批次失败: ${errorMessage(retryErr)}`);
+              await maybePauseAfterFailure(page, c, `W${wi} 批次失败`);
+              log(`✗ 批次失败: ${errorMessage(err)}`);
             }
+          }
+
+          if (resetConversationAfterBatch) {
+            convReady = false;
+            countInConv = 0;
           } else {
+            countInConv += chs.length;
+          }
+        } else {
+          try {
+            await processBatchWithDeepSeek(wi, chs, c);
+          } catch (err) {
             failed += chs.length;
             consecutiveSoftFailures += chs.length;
-            await maybePauseAfterFailure(page, c, `W${wi} 批次失败`);
+            await maybePauseAfterFailure(undefined, c, `W${wi} 批次失败`);
             log(`✗ 批次失败: ${errorMessage(err)}`);
           }
         }
 
-        if (resetConversationAfterBatch) {
-          convReady = false;
-          countInConv = 0;
-        } else {
-          countInConv += chs.length;
-        }
         attempted += chs.length;
         if (attempted >= limit) {
           log(`已达本次上限 ${limit} 章，停止（改 config.json 的 maxChapters 放开）。`);
@@ -970,7 +1168,11 @@ async function run(cfg: OutlineConfig, dryRun: boolean): Promise<RunResult> {
     }
   }
 
-  await Promise.all(pages.map((p, i) => worker(i, p)));
+  if (cfg.aiProvider === 'chatgpt') {
+    await Promise.all(pages.map((p, i) => worker(i, p)));
+  } else {
+    await Promise.all(Array.from({ length: workers }, (_, i) => worker(i)));
+  }
 
   if (fatal) {
     log(`本轮中止。成功 ${done}，失败 ${failed}。`);

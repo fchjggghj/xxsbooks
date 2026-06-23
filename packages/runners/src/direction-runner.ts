@@ -7,6 +7,7 @@ import {
   type DirectionConfig,
   type OutlineItem,
   type Novel,
+  type DeepSeekConfig,
   log,
   errorMessage,
   isBrowserClosedError,
@@ -15,14 +16,27 @@ import {
   getConfigPath,
   getPages,
   newConversation,
-  sendAndCollect,
-  hitRateLimit,
+  sendAndCollect as sendAndCollectChatGPT,
+  hitRateLimit as hitRateLimitChatGPT,
+  deepseek,
 } from '@novel-pipeline/shared';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 
 const MIN_DONE_BYTES = 500;
+
+function createDeepSeekConfig(config: DirectionConfig): DeepSeekConfig {
+  return {
+    apiKey: config.deepseekApiKey,
+    baseUrl: config.deepseekBaseUrl || undefined,
+    model: config.deepseekModel || undefined,
+    temperature: config.deepseekTemperature || undefined,
+    maxTokens: config.deepseekMaxTokens || undefined,
+    rateLimitWaitMs: config.rateLimitWaitMs,
+    maxRateLimitWaitMs: config.maxRateLimitWaitMs,
+  };
+}
 
 function loadConfig(): DirectionConfig {
   const cfgPath = getConfigPath('direction', PROJECT_ROOT);
@@ -116,7 +130,20 @@ async function sendDirectionRequest(
   prompt: string,
   config: DirectionConfig,
 ): Promise<string> {
-  const result = await sendAndCollect(page, prompt, config);
+  const result = await sendAndCollectChatGPT(page, prompt, config);
+
+  if (result.error) throw new Error(result.error);
+  if (!result.text || result.text.length < MIN_DONE_BYTES) throw new Error('响应内容过短');
+
+  return result.text;
+}
+
+async function sendDirectionRequestWithDeepSeek(
+  prompt: string,
+  config: DirectionConfig,
+): Promise<string> {
+  const deepseekCfg = createDeepSeekConfig(config);
+  const result = await deepseek.sendAndCollect(prompt, deepseekCfg);
 
   if (result.error) throw new Error(result.error);
   if (!result.text || result.text.length < MIN_DONE_BYTES) throw new Error('响应内容过短');
@@ -166,7 +193,7 @@ function writeDirection(outputPath: string, direction: AdaptDirection): void {
 }
 
 async function processWorld(
-  page: Page,
+  page: Page | null,
   worldName: string,
   outlines: OutlineItem[],
   bookId: string,
@@ -187,7 +214,9 @@ async function processWorld(
   const prompt = `${config.promptPrefix}\n\n【小说世界：${worldName}】\n\n${outlineContents}\n\n请输出JSON格式的改编方向建议：`;
 
   try {
-    const response = await sendDirectionRequest(page, prompt, config);
+    const response = config.aiProvider === 'deepseek'
+      ? await sendDirectionRequestWithDeepSeek(prompt, config)
+      : await sendDirectionRequest(page!, prompt, config);
     const direction = parseDirectionResponse(response, bookId, worldName, worldIndex);
 
     if (!direction) {
@@ -203,7 +232,7 @@ async function processWorld(
   }
 }
 
-async function processNovel(page: Page, novel: Novel, config: DirectionConfig): Promise<{ done: number; failed: number }> {
+async function processNovel(page: Page | null, novel: Novel, config: DirectionConfig): Promise<{ done: number; failed: number }> {
   log(`开始小说: ${novel.name}`);
 
   const storyArcs = groupByStoryArc(novel, config.inputRoot, '.md');
@@ -230,7 +259,7 @@ async function processNovel(page: Page, novel: Novel, config: DirectionConfig): 
     if (success) done++;
     else failed++;
 
-    if (await hitRateLimit(page)) {
+    if (config.aiProvider !== 'deepseek' && page && await hitRateLimitChatGPT(page)) {
       log('批量撞配额墙，暂停 30 分钟…');
       await sleep(config.rateLimitWaitMs);
     }
@@ -253,17 +282,24 @@ async function main() {
 
     console.log(`__PENDING__=${totalWorlds}`);
     log(`处理计划：${novels.length}本小说，${totalWorlds}个世界`);
+    log(`AI 提供商：${config.aiProvider}`);
 
-    const { pages } = await getPages(config, 1);
-    const page = pages[0];
+    let page: Page | null = null;
+
+    if (config.aiProvider !== 'deepseek') {
+      const { pages } = await getPages(config, 1);
+      page = pages[0];
+    }
 
     for (const novel of novels) {
-      if (await hitRateLimit(page)) {
+      if (config.aiProvider !== 'deepseek' && page && await hitRateLimitChatGPT(page)) {
         log('配额墙，等待重试…');
         await sleep(config.rateLimitWaitMs);
       }
 
-      await newConversation(page, config);
+      if (config.aiProvider !== 'deepseek' && page) {
+        await newConversation(page, config);
+      }
 
       const { done, failed } = await processNovel(page, novel, config);
       log(`小说 ${novel.name} 完成 ${done} 个世界，失败 ${failed} 个世界`);

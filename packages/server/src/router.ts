@@ -80,6 +80,7 @@ import {
   addChapterToBook,
   removeChapterFromBook,
   exportBookOutline,
+  deepseek,
 } from '@novel-pipeline/shared';
 
 type Body = Record<string, unknown>;
@@ -593,6 +594,38 @@ export async function handleRequest(
       const body = await readBody(req);
       const r = await handleChatGptAction(body);
       return sendJson(res, r.ok ? 200 : 400, r);
+    }
+
+    if (p === '/api/deepseek/test' && method === 'POST') {
+      const body = await readBody(req);
+      const apiKey = String(body.apiKey || '');
+      if (!apiKey) return sendJson(res, 400, { error: 'apiKey 不能为空' });
+      const valid = await deepseek.checkApiKey(apiKey);
+      return sendJson(res, 200, { valid, message: valid ? 'API Key 有效' : 'API Key 无效' });
+    }
+
+    if (p === '/api/deepseek/models' && method === 'POST') {
+      const body = await readBody(req);
+      const apiKey = String(body.apiKey || '');
+      const baseUrl = String(body.baseUrl || '');
+      if (!apiKey) return sendJson(res, 400, { error: 'apiKey 不能为空' });
+      const models = await deepseek.listModels(apiKey, baseUrl || undefined);
+      return sendJson(res, 200, { models });
+    }
+
+    if (p === '/api/deepseek/chat' && method === 'POST') {
+      const body = await readBody(req);
+      const prompt = String(body.prompt || '');
+      const apiKey = String(body.apiKey || '');
+      const model = String(body.model || '');
+      const systemMessage = String(body.systemMessage || '');
+      if (!prompt) return sendJson(res, 400, { error: 'prompt 不能为空' });
+      if (!apiKey) return sendJson(res, 400, { error: 'apiKey 不能为空' });
+      const result = await deepseek.sendChat(prompt, {
+        apiKey,
+        model: model || undefined,
+      }, systemMessage || undefined);
+      return sendJson(res, 200, result);
     }
 
     if (method === 'POST' && p === '/api/config') {

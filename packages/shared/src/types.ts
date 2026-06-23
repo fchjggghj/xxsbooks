@@ -124,6 +124,8 @@ export interface ProgressInfo {
   eta?: string; // 预计完成时间
 }
 
+export type AiProvider = 'chatgpt' | 'deepseek';
+
 /** 配置基类 */
 export interface BaseConfig {
   cdpUrl: string;
@@ -141,6 +143,12 @@ export interface BaseConfig {
   stuckRetries: number;
   minOutputChars: number;
   deleteConversationAfterDone: boolean;
+  aiProvider: AiProvider;
+  deepseekApiKey: string;
+  deepseekModel: string;
+  deepseekBaseUrl: string;
+  deepseekTemperature: number;
+  deepseekMaxTokens: number;
 }
 
 /** 拆大纲配置 */

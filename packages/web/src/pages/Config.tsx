@@ -11,11 +11,12 @@ import type { AppConfig } from '@/lib/api';
 
 interface FieldDef {
   k: string;
-  t: 'text' | 'number' | 'bool' | 'lines' | 'textarea';
+  t: 'text' | 'number' | 'bool' | 'lines' | 'textarea' | 'select';
   label: string;
   hint?: string;
   star?: boolean;
   browse?: boolean;
+  options?: { value: string; label: string }[];
 }
 
 interface SchemaGroup {
@@ -27,7 +28,23 @@ interface SchemaGroup {
 
 const COMMON_GROUPS: SchemaGroup[] = [
   {
-    g: '执行端连接',
+    g: 'AI 服务提供商',
+    fields: [
+      {
+        k: 'aiProvider',
+        t: 'select',
+        label: 'AI 提供商',
+        star: true,
+        hint: '选择使用的 AI 服务',
+        options: [
+          { value: 'chatgpt', label: 'ChatGPT（浏览器自动化）' },
+          { value: 'deepseek', label: 'DeepSeek（API 调用）' },
+        ],
+      },
+    ],
+  },
+  {
+    g: '执行端连接（ChatGPT 模式）',
     fields: [
       {
         k: 'gptUrl',
@@ -41,6 +58,42 @@ const COMMON_GROUPS: SchemaGroup[] = [
         t: 'text',
         label: 'Chrome 调试地址',
         hint: '默认 http://localhost:9222',
+      },
+    ],
+  },
+  {
+    g: 'DeepSeek API 配置',
+    fields: [
+      {
+        k: 'deepseekApiKey',
+        t: 'text',
+        label: 'API Key',
+        star: true,
+        hint: 'DeepSeek API Key（sk-开头）',
+      },
+      {
+        k: 'deepseekModel',
+        t: 'text',
+        label: '模型名称',
+        hint: '默认 deepseek-chat，可选 deepseek-coder',
+      },
+      {
+        k: 'deepseekBaseUrl',
+        t: 'text',
+        label: 'API 基础地址',
+        hint: '默认 https://api.deepseek.com',
+      },
+      {
+        k: 'deepseekTemperature',
+        t: 'number',
+        label: '温度系数',
+        hint: '0-1 之间，越高越随机',
+      },
+      {
+        k: 'deepseekMaxTokens',
+        t: 'number',
+        label: '最大输出 Token',
+        hint: '默认 8192',
       },
     ],
   },
@@ -481,6 +534,20 @@ export function Config() {
                           data-t="number"
                           defaultValue={(v as number | string | undefined) ?? ''}
                         />
+                      ) : f.t === 'select' ? (
+                        <select
+                          data-k={f.k}
+                          data-t="text"
+                          defaultValue={(v as string | undefined) ?? ''}
+                          className="flex h-9 w-full rounded-[10px] border border-border/80 bg-surface-3/80 px-3 py-2 text-sm text-txt transition-all duration-150 hover:border-border focus:border-accent focus:bg-surface-2 focus:outline-none focus:ring-2 focus:ring-accent/20"
+                        >
+                          <option value="">请选择...</option>
+                          {f.options?.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
                       ) : f.t === 'lines' ? (
                         <textarea
                           data-k={f.k}

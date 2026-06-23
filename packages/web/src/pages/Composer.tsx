@@ -1,13 +1,23 @@
 import { useState, useEffect } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete, type NewBook, type NewBookChapter, type NewBooksResponse, type OutlinePoolItem, type PoolItemsResponse } from '../lib/api';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { useToast } from '@/hooks/useToast';
+import { apiGet, apiPost, apiPut, apiDelete, type NewBook, type NewBookChapter, type NewBooksResponse, type PoolItemsResponse } from '../lib/api';
+import { BookOpen, Plus, Edit2, Trash2, X, ArrowUpDown, Download, FileText, Clock, Tag } from 'lucide-react';
 
 export default function Composer() {
   const [books, setBooks] = useState<NewBook[]>([]);
-  const [poolItems, setPoolItems] = useState<OutlinePoolItem[]>([]);
+  const [poolItems, setPoolItems] = useState<any[]>([]);
   const [selectedBook, setSelectedBook] = useState<NewBook | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showAddChapterModal, setShowAddChapterModal] = useState(false);
-  const [newBookData, setNewBookData] = useState({ title: '', author: '', genre: '', description: '' });
+  const [newBookTitle, setNewBookTitle] = useState('');
+  const [editingBook, setEditingBook] = useState<NewBook | null>(null);
+  const [loading, setLoading] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     fetchBooks();
@@ -15,396 +25,427 @@ export default function Composer() {
   }, []);
 
   async function fetchBooks() {
+    setLoading(true);
     try {
       const res = await apiGet<NewBooksResponse>('/books/new');
-      setBooks(res.books);
+      setBooks(res.books || []);
     } catch (err) {
-      console.error('获取新书列表失败:', err);
+      toast.error(String(err));
+    } finally {
+      setLoading(false);
     }
   }
 
   async function fetchPoolItems() {
     try {
       const res = await apiGet<PoolItemsResponse>('/pool');
-      setPoolItems(res.items);
+      setPoolItems(res.items || []);
     } catch (err) {
-      console.error('获取大纲池失败:', err);
+      toast.error(String(err));
     }
   }
 
-  async function handleCreateBook() {
-    if (!newBookData.title.trim()) {
-      alert('请输入书名');
+  async function handleCreate() {
+    if (!newBookTitle.trim()) {
+      toast.error('请输入书名');
       return;
     }
     try {
-      const book: Omit<NewBook, 'id' | 'createdAt'> = {
-        ...newBookData,
-        chapters: [],
-        totalChapters: 0,
-        wordCount: 0,
-      };
-      await apiPost<NewBook>('/books/new', book);
+      await apiPost<NewBook>('/books/new', { title: newBookTitle });
+      toast.success('创建成功');
       setShowCreateModal(false);
-      setNewBookData({ title: '', author: '', genre: '', description: '' });
+      setNewBookTitle('');
       fetchBooks();
     } catch (err) {
-      console.error('创建新书失败:', err);
+      toast.error(String(err));
     }
   }
 
-  async function handleSelectBook(book: NewBook) {
-    setSelectedBook(book);
+  async function handleEdit(book: NewBook) {
+    setEditingBook(book);
+    setShowEditModal(true);
   }
 
-  async function handleAddChapterFromPool(poolItem: OutlinePoolItem) {
-    if (!selectedBook) return;
-    const chapter: Omit<NewBookChapter, 'id'> = {
-      index: selectedBook.chapters.length + 1,
-      title: `第${selectedBook.chapters.length + 1}章`,
-      content: poolItem.outlineName,
-      sourcePoolItemId: poolItem.id,
-    };
+  async function handleSaveEdit() {
+    if (!editingBook) return;
     try {
-      await apiPost<NewBook>(`/books/new/${selectedBook.id}/chapters`, chapter);
+      await apiPut<NewBook>(`/books/new/${editingBook.id}`, editingBook);
+      toast.success('保存成功');
+      setShowEditModal(false);
+      fetchBooks();
+    } catch (err) {
+      toast.error(String(err));
+    }
+  }
+
+  async function handleDelete(bookId: string) {
+    if (!confirm('确定删除该书？')) return;
+    try {
+      await apiDelete(`/books/new/${bookId}`);
+      toast.success('删除成功');
+      if (selectedBook?.id === bookId) setSelectedBook(null);
+      fetchBooks();
+    } catch (err) {
+      toast.error(String(err));
+    }
+  }
+
+  async function handleAddChapter(poolItemId: string) {
+    if (!selectedBook) return;
+    try {
+      await apiPost<NewBookChapter>(`/books/new/${selectedBook.id}/chapters`, { poolItemId });
+      toast.success('章节添加成功');
       setShowAddChapterModal(false);
       fetchBooks();
-      const updated = await apiGet<NewBook>(`/books/new/${selectedBook.id}`);
-      setSelectedBook(updated);
+      const updated = books.find(b => b.id === selectedBook.id);
+      if (updated) setSelectedBook(updated);
     } catch (err) {
-      console.error('添加章节失败:', err);
-    }
-  }
-
-  async function handleAddCustomChapter() {
-    if (!selectedBook) return;
-    const chapter: Omit<NewBookChapter, 'id'> = {
-      index: selectedBook.chapters.length + 1,
-      title: `第${selectedBook.chapters.length + 1}章 新章节`,
-      content: '请输入章节大纲内容...',
-      sourcePoolItemId: '',
-    };
-    try {
-      await apiPost<NewBook>(`/books/new/${selectedBook.id}/chapters`, chapter);
-      setShowAddChapterModal(false);
-      fetchBooks();
-      const updated = await apiGet<NewBook>(`/books/new/${selectedBook.id}`);
-      setSelectedBook(updated);
-    } catch (err) {
-      console.error('添加章节失败:', err);
-    }
-  }
-
-  async function handleUpdateChapter(chapterId: string, updates: Partial<NewBookChapter>) {
-    if (!selectedBook) return;
-    try {
-      const updatedChapters = selectedBook.chapters.map((ch) =>
-        ch.id === chapterId ? { ...ch, ...updates } : ch
-      );
-      await apiPut<NewBook>(`/books/new/${selectedBook.id}`, { ...selectedBook, chapters: updatedChapters });
-      const updated = await apiGet<NewBook>(`/books/new/${selectedBook.id}`);
-      setSelectedBook(updated);
-    } catch (err) {
-      console.error('更新章节失败:', err);
+      toast.error(String(err));
     }
   }
 
   async function handleRemoveChapter(chapterId: string) {
-    if (!selectedBook || !confirm('确定删除该章节？')) return;
-    try {
-      await apiDelete(`/books/new/${selectedBook.id}/chapters/${chapterId}`);
-      fetchBooks();
-      const updated = await apiGet<NewBook>(`/books/new/${selectedBook.id}`);
-      setSelectedBook(updated);
-    } catch (err) {
-      console.error('删除章节失败:', err);
-    }
-  }
-
-  async function handleExportOutline() {
     if (!selectedBook) return;
     try {
-      await apiPost<{ path: string }>(`/books/new/${selectedBook.id}/export`);
-      alert('大纲已导出！');
-    } catch (err) {
-      console.error('导出大纲失败:', err);
-    }
-  }
-
-  async function handleDeleteBook(bookId: string) {
-    if (!confirm('确定删除该书？')) return;
-    try {
-      await apiDelete(`/books/new/${bookId}`);
-      setSelectedBook(null);
+      await apiDelete(`/books/new/${selectedBook.id}/chapters/${chapterId}`);
+      toast.success('章节已移除');
       fetchBooks();
+      const updated = books.find(b => b.id === selectedBook.id);
+      if (updated) setSelectedBook(updated);
     } catch (err) {
-      console.error('删除新书失败:', err);
+      toast.error(String(err));
     }
   }
 
-  const genres = [...new Set(poolItems.map((item) => item.genre))];
+  async function handleExport(bookId: string) {
+    try {
+      await apiPost(`/books/new/${bookId}/export`);
+      toast.success('导出成功');
+    } catch (err) {
+      toast.error(String(err));
+    }
+  }
+
+  const availablePoolItems = poolItems.filter(item => {
+    if (!selectedBook) return false;
+    return !selectedBook.chapters.some(ch => ch.sourcePoolItemId === item.id);
+  });
+
+  const stats = {
+    totalBooks: books.length,
+    totalChapters: books.reduce((sum, book) => sum + book.chapters.length, 0),
+    avgChapters: books.length ? Math.round(books.reduce((sum, book) => sum + book.chapters.length, 0) / books.length) : 0,
+    finishedBooks: books.filter(b => b.totalChapters > 0).length,
+  };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div className="lg:col-span-1">
-        <div className="bg-white rounded-xl shadow-sm p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">新书列表</h2>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-            >
-              + 新建
-            </button>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <span className="block text-[11px] font-bold uppercase tracking-[1.6px] text-muted">Book Composer</span>
+          <h1 className="mt-0.5 text-[18px] font-bold">新书组合</h1>
+        </div>
+        <Button onClick={() => setShowCreateModal(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          创建新书
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Card className="p-3 border-glow">
+          <div className="flex items-center gap-2 mb-1">
+            <BookOpen className="h-4 w-4 text-accent-2" />
+            <span className="text-xs text-muted">总新书</span>
           </div>
-          <div className="space-y-2">
-            {books.length === 0 ? (
-              <p className="text-gray-500 text-sm">暂无新书，请创建</p>
+          <div className="text-2xl font-bold text-gradient">{stats.totalBooks}</div>
+        </Card>
+        <Card className="p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <FileText className="h-4 w-4 text-cyan" />
+            <span className="text-xs text-muted">总章节</span>
+          </div>
+          <div className="text-2xl font-bold text-cyan">{stats.totalChapters}</div>
+        </Card>
+        <Card className="p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <ArrowUpDown className="h-4 w-4 text-warn" />
+            <span className="text-xs text-muted">平均章节</span>
+          </div>
+          <div className="text-2xl font-bold text-warn">{stats.avgChapters}</div>
+        </Card>
+        <Card className="p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <Clock className="h-4 w-4 text-ok" />
+            <span className="text-xs text-muted">已完成</span>
+          </div>
+          <div className="text-2xl font-bold text-ok">{stats.finishedBooks}</div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Card className="lg:col-span-1 overflow-hidden">
+          <div className="p-4 border-b border-white/[0.06]">
+            <h2 className="text-sm font-semibold">新书列表</h2>
+          </div>
+          <div className="max-h-[600px] overflow-y-auto">
+            {loading ? (
+              <div className="p-4 text-center text-muted">加载中…</div>
+            ) : books.length === 0 ? (
+              <div className="p-4 text-center text-muted">暂无新书</div>
             ) : (
               books.map((book) => (
                 <div
                   key={book.id}
-                  onClick={() => handleSelectBook(book)}
-                  className={`p-3 rounded-lg cursor-pointer transition-colors ${
-                    selectedBook?.id === book.id
-                      ? 'bg-blue-50 border-2 border-blue-500'
-                      : 'bg-gray-50 hover:bg-gray-100 border-2 border-transparent'
+                  onClick={() => setSelectedBook(book)}
+                  className={`border-b border-white/[0.05] px-4 py-3 transition-colors cursor-pointer ${
+                    selectedBook?.id === book.id ? 'bg-surface-3' : 'hover:bg-surface-3/60'
                   }`}
                 >
-                  <div className="font-medium text-gray-900">{book.title}</div>
-                  <div className="text-sm text-gray-500">{book.genre} · {book.totalChapters}章</div>
-                  <div className="text-xs text-gray-400">{book.wordCount}字</div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-txt">{book.title}</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-muted">{book.chapters.length} 章节</span>
+                        <Badge className={book.totalChapters > 0 ? 'bg-ok/15 text-ok' : 'bg-warn/15 text-warn'}>
+                          {book.totalChapters > 0 ? '已完成' : '创作中'}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleEdit(book); }}
+                        className="rounded p-1 text-muted transition-colors hover:text-txt"
+                        title="编辑"
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDelete(book.id); }}
+                        className="rounded p-1 text-muted transition-colors hover:text-rose-400"
+                        title="删除"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ))
             )}
           </div>
-        </div>
-      </div>
+        </Card>
 
-      <div className="lg:col-span-2">
-        {selectedBook ? (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <div className="flex items-start justify-between">
+        <Card className="lg:col-span-2 overflow-hidden">
+          {selectedBook ? (
+            <>
+              <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
                 <div>
-                  <h1 className="text-2xl font-bold">{selectedBook.title}</h1>
-                  <p className="text-gray-500 mt-1">{selectedBook.author}</p>
+                  <h2 className="text-sm font-semibold">{selectedBook.title}</h2>
+                  <span className="text-xs text-muted">ID: {selectedBook.id}</span>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setShowAddChapterModal(true)}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-                  >
-                    + 添加章节
-                  </button>
-                  <button
-                    onClick={handleExportOutline}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
-                  >
-                    导出大纲
-                  </button>
-                  <button
-                    onClick={() => handleDeleteBook(selectedBook.id)}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
-                  >
-                    删除
-                  </button>
-                </div>
+                <Button onClick={() => handleExport(selectedBook.id)} size="sm">
+                  <Download className="mr-2 h-4 w-4" />
+                  导出
+                </Button>
               </div>
-              <div className="mt-4 flex items-center gap-4">
-                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                  {selectedBook.genre}
-                </span>
-                <span className="text-sm text-gray-500">{selectedBook.totalChapters} 章节</span>
-                <span className="text-sm text-gray-500">{selectedBook.wordCount} 字数</span>
-              </div>
-              <div className="mt-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">简介</label>
-                <textarea
-                  value={selectedBook.description}
-                  onChange={(e) => handleUpdateChapter('', { index: 0 })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  rows={3}
-                />
-              </div>
-            </div>
 
-            <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-              <div className="px-4 py-3 border-b bg-gray-50">
-                <h3 className="font-medium">章节列表</h3>
-              </div>
-              <div className="divide-y divide-gray-200">
+              <div className="p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{selectedBook.chapters.length} 章节</Badge>
+                    <Badge className={selectedBook.totalChapters > 0 ? 'bg-ok/15 text-ok' : 'bg-warn/15 text-warn'}>
+                      {selectedBook.totalChapters > 0 ? '已完成' : '创作中'}
+                    </Badge>
+                  </div>
+                  <Button size="sm" onClick={() => setShowAddChapterModal(true)}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    添加章节
+                  </Button>
+                </div>
+
                 {selectedBook.chapters.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-gray-500">
-                    暂无章节，点击上方按钮添加
+                  <div className="text-center py-8 text-muted">
+                    <BookOpen className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <p>暂无章节，点击上方按钮从大纲池添加</p>
                   </div>
                 ) : (
-                  selectedBook.chapters.map((chapter) => (
-                    <div key={chapter.id} className="px-4 py-4 hover:bg-gray-50">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-3">
-                          <span className="text-lg font-bold text-blue-600">第{chapter.index}章</span>
-                          <input
-                            type="text"
-                            value={chapter.title}
-                            onChange={(e) => handleUpdateChapter(chapter.id, { title: e.target.value })}
-                            className="font-medium text-gray-900 border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none"
-                          />
+                  <div className="space-y-2">
+                    {selectedBook.chapters.map((chapter, index) => (
+                      <div
+                        key={chapter.id}
+                        className="flex items-center gap-3 p-3 rounded-lg border border-white/[0.06] bg-surface-3/40"
+                      >
+                        <span className="w-8 h-8 flex items-center justify-center rounded-md bg-accent/15 text-accent-2 text-sm font-bold">
+                          {index + 1}
+                        </span>
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-txt">{chapter.title}</div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-muted">来源: {chapter.sourcePoolItemId}</span>
+                          </div>
                         </div>
                         <button
                           onClick={() => handleRemoveChapter(chapter.id)}
-                          className="text-red-600 hover:text-red-900 text-sm"
+                          className="rounded p-1 text-muted transition-colors hover:text-rose-400"
+                          title="移除章节"
                         >
-                          删除
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
-                      <textarea
-                        value={chapter.content}
-                        onChange={(e) => handleUpdateChapter(chapter.id, { content: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                        rows={4}
-                        placeholder="输入章节大纲内容..."
-                      />
-                      {chapter.sourcePoolItemId && (
-                        <div className="mt-2 text-xs text-gray-400">
-                          来源：大纲池项 {chapter.sourcePoolItemId}
-                        </div>
-                      )}
-                    </div>
-                  ))
+                    ))}
+                  </div>
                 )}
               </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 text-muted">
+              <BookOpen className="h-16 w-16 mb-4 opacity-30" />
+              <p className="text-lg">选择一本新书查看详情</p>
+              <p className="text-sm mt-1">或创建一本新书开始组合章节</p>
             </div>
-          </div>
-        ) : (
-          <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-            <div className="text-gray-400 text-6xl mb-4">📚</div>
-            <h2 className="text-xl font-medium text-gray-900">选择一本新书开始编辑</h2>
-            <p className="text-gray-500 mt-2">或点击左侧"新建"按钮创建新书</p>
-          </div>
-        )}
+          )}
+        </Card>
       </div>
 
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-            <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold">创建新书</h2>
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-5 backdrop-blur-md"
+          onClick={() => setShowCreateModal(false)}
+        >
+          <div
+            className="flex w-[min(500px,94vw)] flex-col rounded-2xl border border-white/[0.1] bg-surface-2 shadow-[0_24px_60px_-28px_rgba(0,0,0,0.8)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 border-b border-white/[0.06] px-4.5 py-3.5">
+              <Plus className="h-5 w-5" />
+              <strong className="text-[15px]">创建新书</strong>
               <button
+                className="ml-auto text-muted transition-colors hover:text-txt"
                 onClick={() => setShowCreateModal(false)}
-                className="text-gray-500 hover:text-gray-700"
               >
-                ✕
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">书名</label>
-                <input
-                  type="text"
-                  value={newBookData.title}
-                  onChange={(e) => setNewBookData({ ...newBookData, title: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  placeholder="输入书名"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">作者</label>
-                <input
-                  type="text"
-                  value={newBookData.author}
-                  onChange={(e) => setNewBookData({ ...newBookData, author: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  placeholder="输入作者名"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">题材</label>
-                <select
-                  value={newBookData.genre}
-                  onChange={(e) => setNewBookData({ ...newBookData, genre: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                >
-                  <option value="">选择题材</option>
-                  {genres.map((genre) => (
-                    <option key={genre} value={genre}>{genre}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">简介</label>
-                <textarea
-                  value={newBookData.description}
-                  onChange={(e) => setNewBookData({ ...newBookData, description: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  rows={3}
-                  placeholder="输入书籍简介..."
-                />
-              </div>
+            <div className="p-5">
+              <label className="block text-xs text-muted mb-1">书名</label>
+              <Input
+                value={newBookTitle}
+                onChange={(e) => setNewBookTitle(e.target.value)}
+                placeholder="输入新书名称..."
+              />
             </div>
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-              >
+            <div className="flex justify-end gap-2 pt-2 border-t border-white/[0.06] px-4.5 py-3.5">
+              <Button variant="outline" onClick={() => setShowCreateModal(false)}>
                 取消
-              </button>
-              <button
-                onClick={handleCreateBook}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                创建
-              </button>
+              </Button>
+              <Button onClick={handleCreate}>创建</Button>
             </div>
           </div>
         </div>
       )}
 
-      {showAddChapterModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold">添加章节</h2>
+      {showEditModal && editingBook && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-5 backdrop-blur-md"
+          onClick={() => setShowEditModal(false)}
+        >
+          <div
+            className="flex w-[min(500px,94vw)] flex-col rounded-2xl border border-white/[0.1] bg-surface-2 shadow-[0_24px_60px_-28px_rgba(0,0,0,0.8)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 border-b border-white/[0.06] px-4.5 py-3.5">
+              <Edit2 className="h-5 w-5" />
+              <strong className="text-[15px]">编辑新书</strong>
               <button
-                onClick={() => setShowAddChapterModal(false)}
-                className="text-gray-500 hover:text-gray-700"
+                className="ml-auto text-muted transition-colors hover:text-txt"
+                onClick={() => setShowEditModal(false)}
               >
-                ✕
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="p-6">
-              <div className="mb-4">
-                <button
-                  onClick={handleAddCustomChapter}
-                  className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-                >
-                  + 添加自定义章节
-                </button>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs text-muted mb-1">书名</label>
+                <Input
+                  value={editingBook.title}
+                  onChange={(e) => setEditingBook({ ...editingBook, title: e.target.value })}
+                />
               </div>
-              <div className="border-t pt-4">
-                <h3 className="font-medium text-gray-700 mb-3">从大纲池选择</h3>
-                <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                  {poolItems.length === 0 ? (
-                    <p className="text-gray-500 text-sm">大纲池为空</p>
-                  ) : (
-                    poolItems.map((item) => (
-                      <div
-                        key={item.id}
-                        className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer"
-                        onClick={() => handleAddChapterFromPool(item)}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-green-100 text-green-800">
-                            {item.genre}
-                          </span>
-                          <span className="text-sm text-gray-500">{item.bookId}</span>
-                        </div>
-                        <p className="text-sm text-gray-900 mt-1 line-clamp-2">{item.outlineName}</p>
-                      </div>
-                    ))
-                  )}
+              <div>
+                <label className="block text-xs text-muted mb-1">作者</label>
+                <Input
+                  value={editingBook.author}
+                  onChange={(e) => setEditingBook({ ...editingBook, author: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted mb-1">题材</label>
+                <Input
+                  value={editingBook.genre}
+                  onChange={(e) => setEditingBook({ ...editingBook, genre: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-white/[0.06] px-4.5 py-3.5">
+              <Button variant="outline" onClick={() => setShowEditModal(false)}>
+                取消
+              </Button>
+              <Button onClick={handleSaveEdit}>保存</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddChapterModal && selectedBook && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-5 backdrop-blur-md"
+          onClick={() => setShowAddChapterModal(false)}
+        >
+          <div
+            className="flex w-[min(600px,94vw)] flex-col rounded-2xl border border-white/[0.1] bg-surface-2 shadow-[0_24px_60px_-28px_rgba(0,0,0,0.8)] max-h-[80vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 border-b border-white/[0.06] px-4.5 py-3.5">
+              <Plus className="h-5 w-5" />
+              <strong className="text-[15px]">从大纲池添加章节</strong>
+              <button
+                className="ml-auto text-muted transition-colors hover:text-txt"
+                onClick={() => setShowAddChapterModal(false)}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              {availablePoolItems.length === 0 ? (
+                <div className="text-center py-8 text-muted">
+                  <Tag className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p>大纲池已无可用章节</p>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  {availablePoolItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-3 rounded-lg border border-white/[0.06] bg-surface-3/40 hover:border-accent/30 transition-colors"
+                    >
+                      <div>
+                        <div className="text-sm font-medium text-txt">{item.outlineName}</div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge variant="outline" className="text-[11px]">{item.genre}</Badge>
+                          <span className="text-xs text-muted">{item.wordCount} 字</span>
+                        </div>
+                      </div>
+                      <Button size="sm" onClick={() => handleAddChapter(item.id)}>
+                        添加
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-white/[0.06] px-4.5 py-3.5">
+              <Button variant="outline" onClick={() => setShowAddChapterModal(false)}>
+                关闭
+              </Button>
             </div>
           </div>
         </div>

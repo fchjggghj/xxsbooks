@@ -46,6 +46,8 @@ export interface PipelineStage {
   contextScope?: string;
 }
 
+export type AiProvider = 'chatgpt' | 'deepseek';
+
 export interface AppConfig {
   gptUrl?: string;
   cdpUrl?: string;
@@ -53,7 +55,6 @@ export interface AppConfig {
   chaptersDir?: string;
   outputDir?: string;
   outputExt?: string;
-  // adapt/generate 任务通用字段
   inputRoot?: string;
   inputExt?: string;
   outputRoot?: string;
@@ -86,6 +87,12 @@ export interface AppConfig {
   webPort?: number;
   scheduledTaskName?: string;
   pipelineStages?: PipelineStage[];
+  aiProvider?: AiProvider;
+  deepseekApiKey?: string;
+  deepseekModel?: string;
+  deepseekBaseUrl?: string;
+  deepseekTemperature?: number;
+  deepseekMaxTokens?: number;
   [key: string]: unknown;
 }
 
