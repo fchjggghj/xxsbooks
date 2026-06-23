@@ -1,0 +1,22 @@
+{
+  "id": "0002-dir-3",
+  "bookId": "0002",
+  "worldName": "戏子",
+  "worldIndex": 3,
+  "coreConflict": "家族恩怨与皇权斗争交织",
+  "protagonist": {
+    "name": "苏婉清",
+    "personality": "温婉聪慧",
+    "motivation": "守护家族",
+    "arc": "从闺阁少女到女主人"
+  },
+  "tone": "深情虐恋，权谋博弈",
+  "readerTarget": "喜欢古代言情的女性读者",
+  "keyTwists": [
+    "身份秘密",
+    "信任背叛",
+    "关键反转"
+  ],
+  "theme": "真爱与权力的博弈",
+  "createdAt": "2026-06-23T05:07:24.432Z"
+}

@@ -1,0 +1,68 @@
+{
+  "id": "newbook-001",
+  "title": "凤舞九天：权谋皇后",
+  "author": "佚名",
+  "genre": "古代言情",
+  "description": "女主从闺阁少女成长为一代皇后的传奇故事",
+  "chapters": [
+    {
+      "id": "0001-pool-1-ch-1",
+      "index": 1,
+      "title": "第001章_穿越重生1",
+      "content": "这是第1章的大纲内容，来自穿越重生题材的0001书籍。主要情节包括...",
+      "sourcePoolItemId": "0001-pool-1"
+    },
+    {
+      "id": "0001-pool-2-ch-2",
+      "index": 2,
+      "title": "第002章_穿越重生2",
+      "content": "这是第2章的大纲内容，来自穿越重生题材的0001书籍。主要情节包括...",
+      "sourcePoolItemId": "0001-pool-2"
+    },
+    {
+      "id": "0001-pool-3-ch-3",
+      "index": 3,
+      "title": "第003章_穿越重生3",
+      "content": "这是第3章的大纲内容，来自穿越重生题材的0001书籍。主要情节包括...",
+      "sourcePoolItemId": "0001-pool-3"
+    },
+    {
+      "id": "0001-pool-4-ch-4",
+      "index": 4,
+      "title": "第004章_穿越重生4",
+      "content": "这是第4章的大纲内容，来自穿越重生题材的0001书籍。主要情节包括...",
+      "sourcePoolItemId": "0001-pool-4"
+    },
+    {
+      "id": "0001-pool-5-ch-5",
+      "index": 5,
+      "title": "第005章_穿越重生5",
+      "content": "这是第5章的大纲内容，来自穿越重生题材的0001书籍。主要情节包括...",
+      "sourcePoolItemId": "0001-pool-5"
+    },
+    {
+      "id": "0001-pool-6-ch-6",
+      "index": 6,
+      "title": "第006章_穿越重生6",
+      "content": "这是第6章的大纲内容，来自穿越重生题材的0001书籍。主要情节包括...",
+      "sourcePoolItemId": "0001-pool-6"
+    },
+    {
+      "id": "0001-pool-7-ch-7",
+      "index": 7,
+      "title": "第007章_穿越重生7",
+      "content": "这是第7章的大纲内容，来自穿越重生题材的0001书籍。主要情节包括...",
+      "sourcePoolItemId": "0001-pool-7"
+    },
+    {
+      "id": "0001-pool-8-ch-8",
+      "index": 8,
+      "title": "第008章_穿越重生8",
+      "content": "这是第8章的大纲内容，来自穿越重生题材的0001书籍。主要情节包括...",
+      "sourcePoolItemId": "0001-pool-8"
+    }
+  ],
+  "totalChapters": 8,
+  "wordCount": 2261,
+  "createdAt": "2026-06-23T05:07:24.433Z"
+}

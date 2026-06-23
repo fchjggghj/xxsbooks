@@ -4,6 +4,7 @@
  * 启动 HTTP 服务器，监听 127.0.0.1:8787。
  */
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { getConfig, getPort, SCAN_TTL } from './config.js';
 import { handleRequest } from './router.js';
 import { getScan } from './scanner.js';
@@ -22,8 +23,10 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.info(`控制中心已启动: http://localhost:${PORT}`);
+  const url = `http://localhost:${PORT}`;
+  console.info(`控制中心已启动: ${url}`);
   console.info(`素材库: ${cfg.libraryRoot}`);
+  openBrowser(url);
   getScan(true).catch((e) => {
     console.error('首次扫描失败:', e instanceof Error ? e.message : String(e));
   });
@@ -34,6 +37,22 @@ server.listen(PORT, '127.0.0.1', () => {
     Math.round(SCAN_TTL * 0.8),
   );
 });
+
+function openBrowser(url: string) {
+  try {
+    const platform = process.platform;
+    if (platform === 'win32') {
+      spawn('cmd', ['/c', 'start', url]);
+    } else if (platform === 'darwin') {
+      spawn('open', [url]);
+    } else {
+      spawn('xdg-open', [url]);
+    }
+    console.info('正在打开浏览器...');
+  } catch {
+    console.info(`请手动打开浏览器访问: ${url}`);
+  }
+}
 
 // 优雅退出
 process.on('SIGINT', () => {

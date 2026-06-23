@@ -178,3 +178,110 @@ export interface AdaptConfig extends BaseConfig {
   /** 参考原文根目录（生成正文时用于读取章节开头作为基调） */
   rawRoot?: string;
 }
+
+// ------------------------------
+// 书库管理相关类型
+// ------------------------------
+
+export type BookStatus = 'raw' | 'broken' | 'adapted' | 'pooled';
+
+export interface Book {
+  id: string;
+  name: string;
+  author: string;
+  source: string;
+  tags: string[];
+  totalChapters: number;
+  wordCount: number;
+  status: BookStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BookMeta {
+  books: Book[];
+}
+
+// ------------------------------
+// 改编方向相关类型
+// ------------------------------
+
+export interface CharacterSetup {
+  name: string;
+  personality: string;
+  motivation: string;
+  arc: string;
+}
+
+export interface AdaptDirection {
+  id: string;
+  bookId: string;
+  worldName: string;
+  worldIndex: number;
+  coreConflict: string;
+  protagonist: CharacterSetup;
+  tone: string;
+  readerTarget: string;
+  keyTwists: string[];
+  theme: string;
+  createdAt: string;
+}
+
+export interface DirectionConfig extends BaseConfig {
+  inputRoot: string;
+  outputRoot: string;
+  novels: string[];
+  promptPrefix: string;
+}
+
+// ------------------------------
+// 大纲池相关类型
+// ------------------------------
+
+export interface OutlinePoolItem {
+  id: string;
+  originalOutline: string;
+  adaptedOutline: string;
+  sourceBookId: string;
+  sourceChapterId: string;
+  genre: string;
+  tags: string[];
+  quality: number;
+  addedAt: string;
+}
+
+export interface PoolIndex {
+  items: OutlinePoolItem[];
+  lastUpdated: string;
+}
+
+// ------------------------------
+// 新书组稿相关类型
+// ------------------------------
+
+export interface NewBookChapter {
+  id: string;
+  index: number;
+  title: string;
+  content: string;
+  sourcePoolItemId: string;
+}
+
+export interface NewBook {
+  id: string;
+  title: string;
+  author: string;
+  genre: string;
+  description: string;
+  chapters: NewBookChapter[];
+  totalChapters: number;
+  wordCount: number;
+  createdAt: string;
+}
+
+export interface ComposerConfig {
+  pipelineRoot: string;
+  poolRoot: string;
+  outputRoot: string;
+  maxWorldsPerBook: number;
+}

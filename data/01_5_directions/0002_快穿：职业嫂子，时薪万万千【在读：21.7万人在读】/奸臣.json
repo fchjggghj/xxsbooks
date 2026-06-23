@@ -1,0 +1,22 @@
+{
+  "id": "0002-dir-1",
+  "bookId": "0002",
+  "worldName": "奸臣",
+  "worldIndex": 1,
+  "coreConflict": "正邪势力对抗",
+  "protagonist": {
+    "name": "叶辰",
+    "personality": "坚毅果敢",
+    "motivation": "复仇雪恨",
+    "arc": "从废柴到天骄"
+  },
+  "tone": "热血激昂，奇幻冒险",
+  "readerTarget": "喜欢玄幻的年轻读者",
+  "keyTwists": [
+    "身份秘密",
+    "信任背叛",
+    "关键反转"
+  ],
+  "theme": "勇气与成长",
+  "createdAt": "2026-06-23T05:07:24.431Z"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "0003-dir-3",
+  "bookId": "0003",
+  "worldName": "戏子",
+  "worldIndex": 3,
+  "coreConflict": "职场竞争与情感纠葛",
+  "protagonist": {
+    "name": "林晓",
+    "personality": "独立坚强",
+    "motivation": "实现理想",
+    "arc": "从职场小白到精英"
+  },
+  "tone": "现实励志，都市情感",
+  "readerTarget": "关注职场的年轻读者",
+  "keyTwists": [
+    "身份秘密",
+    "信任背叛",
+    "关键反转"
+  ],
+  "theme": "梦想与现实的平衡",
+  "createdAt": "2026-06-23T05:07:24.432Z"
+}

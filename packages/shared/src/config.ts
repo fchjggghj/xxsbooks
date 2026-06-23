@@ -3,7 +3,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import type { BaseConfig, OutlineConfig, AdaptConfig } from './types.js';
+import type { BaseConfig, OutlineConfig, AdaptConfig, DirectionConfig } from './types.js';
 
 /** 加载 JSON 配置文件（带 BOM 处理和友好报错） */
 export function loadConfig<T>(cfgPath: string): T {
@@ -69,9 +69,17 @@ export function validateAdaptConfig(cfg: Partial<AdaptConfig>): string[] {
   return errors;
 }
 
+/** 校验改编方向配置 */
+export function validateDirectionConfig(cfg: Partial<DirectionConfig>): string[] {
+  const errors = validateBaseConfig(cfg);
+  if (!cfg.inputRoot) errors.push('inputRoot 不能为空');
+  if (!cfg.outputRoot) errors.push('outputRoot 不能为空');
+  return errors;
+}
+
 /** 获取默认配置路径 */
 export function getConfigPath(
-  runnerType: 'outline' | 'adapt' | 'generate',
+  runnerType: 'outline' | 'adapt' | 'generate' | 'direction',
   pipelineRoot: string,
 ): string {
   const scriptsDir = path.join(pipelineRoot, '程序', 'scripts');
@@ -79,6 +87,7 @@ export function getConfigPath(
     outline: 'gpt-outline-runner',
     adapt: 'gpt-adapt-runner',
     generate: 'gpt-generate-runner',
+    direction: 'gpt-direction-runner',
   };
   return path.join(scriptsDir, dirMap[runnerType], 'config.json');
 }

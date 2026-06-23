@@ -16,6 +16,24 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return res.json();
 }
 
+export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`API ${path} failed: ${res.status}`);
+  return res.json();
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`API ${path} failed: ${res.status}`);
+  return res.json();
+}
+
 // ---------- 类型定义（基于现有 vanilla JS API） ----------
 
 export interface PipelineStage {
@@ -336,6 +354,111 @@ export interface HealthResponse {
   runtime?: HealthRuntime;
   queue?: HealthQueue;
   chrome?: HealthChrome;
+}
+
+// ---------- 书库相关类型 ----------
+
+export type BookStatus = 'raw' | 'broken' | 'adapted' | 'pooled';
+
+export interface LibraryBook {
+  id: string;
+  name: string;
+  author: string;
+  source: string;
+  tags: string[];
+  totalChapters: number;
+  wordCount: number;
+  status: BookStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LibraryResponse {
+  books: LibraryBook[];
+}
+
+export interface LibraryMetaResponse {
+  books: LibraryBook[];
+}
+
+// ---------- 改编方向相关类型 ----------
+
+export interface Protagonist {
+  name: string;
+  personality: string;
+  motivation: string;
+  arc: string;
+}
+
+export interface AdaptDirection {
+  id: string;
+  bookId: string;
+  worldName: string;
+  worldIndex: number;
+  coreConflict: string;
+  protagonist: Protagonist;
+  tone: string;
+  readerTarget: string;
+  keyTwists: string[];
+  theme: string;
+  createdAt: string;
+}
+
+export interface DirectionsResponse {
+  directions: AdaptDirection[];
+}
+
+export interface BatchSyncResponse {
+  count: number;
+}
+
+// ---------- 大纲池相关类型 ----------
+
+export interface OutlinePoolItem {
+  id: string;
+  bookId: string;
+  outlineName: string;
+  chapterNumber: number;
+  genre: string;
+  quality: number;
+  wordCount: number;
+  adapted: boolean;
+  sourcePath: string;
+  createdAt: string;
+}
+
+export interface PoolItemsResponse {
+  items: OutlinePoolItem[];
+}
+
+export interface GenresResponse {
+  genres: string[];
+}
+
+// ---------- 新书组稿相关类型 ----------
+
+export interface NewBookChapter {
+  id: string;
+  index: number;
+  title: string;
+  content: string;
+  sourcePoolItemId: string;
+}
+
+export interface NewBook {
+  id: string;
+  title: string;
+  author: string;
+  genre: string;
+  description: string;
+  chapters: NewBookChapter[];
+  totalChapters: number;
+  wordCount: number;
+  createdAt: string;
+}
+
+export interface NewBooksResponse {
+  books: NewBook[];
 }
 
 // ---------- 多任务类型 ----------

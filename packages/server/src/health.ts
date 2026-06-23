@@ -3,7 +3,7 @@
  *
  * 健康快照：uptime、内存、Chrome、队列、心跳。
  */
-import type { HealthSnapshot } from './types.js';
+import type { HealthSnapshot, ChromeStatus } from './types.js';
 import { chromeStatus } from './chrome.js';
 import {
   heartbeatAgeSec,
@@ -15,12 +15,17 @@ import {
 
 /** 生成健康快照 */
 export async function healthSnapshot(): Promise<HealthSnapshot> {
-  const store = loadQueueStore();
-  const chrome = await chromeStatus();
-  const health = queueHealth(store);
   const mem = process.memoryUsage();
-  const runtime = getQueueRuntime();
-  const hbAge = heartbeatAgeSec();
+
+  const [store, chrome, runtime, hbAge] = await Promise.all([
+    Promise.resolve(loadQueueStore()),
+    Promise.race([chromeStatus(), new Promise<ChromeStatus>((resolve) => setTimeout(() => resolve({ up: false }), 500))]),
+    Promise.resolve(getQueueRuntime()),
+    Promise.resolve(heartbeatAgeSec()),
+  ]);
+
+  const health = queueHealth(store);
+  const recentEvents = readQueueEvents(30);
 
   return {
     ok: health.ok && (!runtime.running || hbAge == null || hbAge < 120),
@@ -34,6 +39,6 @@ export async function healthSnapshot(): Promise<HealthSnapshot> {
     chrome,
     queue: health,
     runtime: { ...runtime, heartbeatAgeSec: hbAge },
-    recentEvents: readQueueEvents(30),
+    recentEvents,
   };
 }

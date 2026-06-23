@@ -1,0 +1,332 @@
+[
+  {
+    "id": "0001-dir-1",
+    "bookId": "0001",
+    "worldName": "奸臣",
+    "worldIndex": 1,
+    "coreConflict": "重生归来改写命运",
+    "protagonist": {
+      "name": "沈若曦",
+      "personality": "冷静睿智",
+      "motivation": "改变命运",
+      "arc": "从懦弱到强者"
+    },
+    "tone": "爽文逆袭，重生复仇",
+    "readerTarget": "喜欢重生流的读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "命运与选择",
+    "createdAt": "2026-06-23T04:56:54.726Z"
+  },
+  {
+    "id": "0001-dir-5",
+    "bookId": "0001",
+    "worldName": "孤王",
+    "worldIndex": 5,
+    "coreConflict": "正邪势力对抗",
+    "protagonist": {
+      "name": "叶辰",
+      "personality": "坚毅果敢",
+      "motivation": "复仇雪恨",
+      "arc": "从废柴到天骄"
+    },
+    "tone": "热血激昂，奇幻冒险",
+    "readerTarget": "喜欢玄幻的年轻读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "勇气与成长",
+    "createdAt": "2026-06-23T04:56:54.728Z"
+  },
+  {
+    "id": "0001-dir-3",
+    "bookId": "0001",
+    "worldName": "戏子",
+    "worldIndex": 3,
+    "coreConflict": "正邪势力对抗",
+    "protagonist": {
+      "name": "叶辰",
+      "personality": "坚毅果敢",
+      "motivation": "复仇雪恨",
+      "arc": "从废柴到天骄"
+    },
+    "tone": "热血激昂，奇幻冒险",
+    "readerTarget": "喜欢玄幻的年轻读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "勇气与成长",
+    "createdAt": "2026-06-23T04:56:54.726Z"
+  },
+  {
+    "id": "0001-dir-2",
+    "bookId": "0001",
+    "worldName": "末世",
+    "worldIndex": 2,
+    "coreConflict": "连环谜案背后隐藏秘密",
+    "protagonist": {
+      "name": "秦明",
+      "personality": "敏锐细致",
+      "motivation": "揭开真相",
+      "arc": "从警员到专家"
+    },
+    "tone": "悬疑紧张，烧脑推理",
+    "readerTarget": "喜欢悬疑推理的读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "真相与谎言",
+    "createdAt": "2026-06-23T04:56:54.726Z"
+  },
+  {
+    "id": "0001-dir-4",
+    "bookId": "0001",
+    "worldName": "道士",
+    "worldIndex": 4,
+    "coreConflict": "正邪势力对抗",
+    "protagonist": {
+      "name": "叶辰",
+      "personality": "坚毅果敢",
+      "motivation": "复仇雪恨",
+      "arc": "从废柴到天骄"
+    },
+    "tone": "热血激昂，奇幻冒险",
+    "readerTarget": "喜欢玄幻的年轻读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "勇气与成长",
+    "createdAt": "2026-06-23T04:56:54.727Z"
+  },
+  {
+    "id": "0002-dir-1",
+    "bookId": "0002",
+    "worldName": "奸臣",
+    "worldIndex": 1,
+    "coreConflict": "重生归来改写命运",
+    "protagonist": {
+      "name": "沈若曦",
+      "personality": "冷静睿智",
+      "motivation": "改变命运",
+      "arc": "从懦弱到强者"
+    },
+    "tone": "爽文逆袭，重生复仇",
+    "readerTarget": "喜欢重生流的读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "命运与选择",
+    "createdAt": "2026-06-23T04:56:54.728Z"
+  },
+  {
+    "id": "0002-dir-5",
+    "bookId": "0002",
+    "worldName": "孤王",
+    "worldIndex": 5,
+    "coreConflict": "末世生存危机",
+    "protagonist": {
+      "name": "陈峰",
+      "personality": "冷静理智",
+      "motivation": "保护幸存者",
+      "arc": "从青年到领袖"
+    },
+    "tone": "紧张刺激，末世求生",
+    "readerTarget": "喜欢科幻的读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "人性与生存",
+    "createdAt": "2026-06-23T04:56:54.729Z"
+  },
+  {
+    "id": "0002-dir-3",
+    "bookId": "0002",
+    "worldName": "戏子",
+    "worldIndex": 3,
+    "coreConflict": "家族恩怨与皇权斗争交织",
+    "protagonist": {
+      "name": "苏婉清",
+      "personality": "温婉聪慧",
+      "motivation": "守护家族",
+      "arc": "从闺阁少女到女主人"
+    },
+    "tone": "深情虐恋，权谋博弈",
+    "readerTarget": "喜欢古代言情的女性读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "真爱与权力的博弈",
+    "createdAt": "2026-06-23T04:56:54.728Z"
+  },
+  {
+    "id": "0002-dir-2",
+    "bookId": "0002",
+    "worldName": "末世",
+    "worldIndex": 2,
+    "coreConflict": "重生归来改写命运",
+    "protagonist": {
+      "name": "沈若曦",
+      "personality": "冷静睿智",
+      "motivation": "改变命运",
+      "arc": "从懦弱到强者"
+    },
+    "tone": "爽文逆袭，重生复仇",
+    "readerTarget": "喜欢重生流的读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "命运与选择",
+    "createdAt": "2026-06-23T04:56:54.728Z"
+  },
+  {
+    "id": "0002-dir-4",
+    "bookId": "0002",
+    "worldName": "道士",
+    "worldIndex": 4,
+    "coreConflict": "连环谜案背后隐藏秘密",
+    "protagonist": {
+      "name": "秦明",
+      "personality": "敏锐细致",
+      "motivation": "揭开真相",
+      "arc": "从警员到专家"
+    },
+    "tone": "悬疑紧张，烧脑推理",
+    "readerTarget": "喜欢悬疑推理的读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "真相与谎言",
+    "createdAt": "2026-06-23T04:56:54.728Z"
+  },
+  {
+    "id": "0003-dir-1",
+    "bookId": "0003",
+    "worldName": "奸臣",
+    "worldIndex": 1,
+    "coreConflict": "末世生存危机",
+    "protagonist": {
+      "name": "陈峰",
+      "personality": "冷静理智",
+      "motivation": "保护幸存者",
+      "arc": "从青年到领袖"
+    },
+    "tone": "紧张刺激，末世求生",
+    "readerTarget": "喜欢科幻的读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "人性与生存",
+    "createdAt": "2026-06-23T04:56:54.729Z"
+  },
+  {
+    "id": "0003-dir-5",
+    "bookId": "0003",
+    "worldName": "孤王",
+    "worldIndex": 5,
+    "coreConflict": "家族恩怨与皇权斗争交织",
+    "protagonist": {
+      "name": "苏婉清",
+      "personality": "温婉聪慧",
+      "motivation": "守护家族",
+      "arc": "从闺阁少女到女主人"
+    },
+    "tone": "深情虐恋，权谋博弈",
+    "readerTarget": "喜欢古代言情的女性读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "真爱与权力的博弈",
+    "createdAt": "2026-06-23T04:56:54.729Z"
+  },
+  {
+    "id": "0003-dir-3",
+    "bookId": "0003",
+    "worldName": "戏子",
+    "worldIndex": 3,
+    "coreConflict": "正邪势力对抗",
+    "protagonist": {
+      "name": "叶辰",
+      "personality": "坚毅果敢",
+      "motivation": "复仇雪恨",
+      "arc": "从废柴到天骄"
+    },
+    "tone": "热血激昂，奇幻冒险",
+    "readerTarget": "喜欢玄幻的年轻读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "勇气与成长",
+    "createdAt": "2026-06-23T04:56:54.729Z"
+  },
+  {
+    "id": "0003-dir-2",
+    "bookId": "0003",
+    "worldName": "末世",
+    "worldIndex": 2,
+    "coreConflict": "正邪势力对抗",
+    "protagonist": {
+      "name": "叶辰",
+      "personality": "坚毅果敢",
+      "motivation": "复仇雪恨",
+      "arc": "从废柴到天骄"
+    },
+    "tone": "热血激昂，奇幻冒险",
+    "readerTarget": "喜欢玄幻的年轻读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "勇气与成长",
+    "createdAt": "2026-06-23T04:56:54.729Z"
+  },
+  {
+    "id": "0003-dir-4",
+    "bookId": "0003",
+    "worldName": "道士",
+    "worldIndex": 4,
+    "coreConflict": "职场竞争与情感纠葛",
+    "protagonist": {
+      "name": "林晓",
+      "personality": "独立坚强",
+      "motivation": "实现理想",
+      "arc": "从职场小白到精英"
+    },
+    "tone": "现实励志，都市情感",
+    "readerTarget": "关注职场的年轻读者",
+    "keyTwists": [
+      "身份秘密",
+      "信任背叛",
+      "关键反转"
+    ],
+    "theme": "梦想与现实的平衡",
+    "createdAt": "2026-06-23T04:56:54.729Z"
+  }
+]

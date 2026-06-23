@@ -1,0 +1,22 @@
+{
+  "id": "0003-dir-1",
+  "bookId": "0003",
+  "worldName": "奸臣",
+  "worldIndex": 1,
+  "coreConflict": "末世生存危机",
+  "protagonist": {
+    "name": "陈峰",
+    "personality": "冷静理智",
+    "motivation": "保护幸存者",
+    "arc": "从青年到领袖"
+  },
+  "tone": "紧张刺激，末世求生",
+  "readerTarget": "喜欢科幻的读者",
+  "keyTwists": [
+    "身份秘密",
+    "信任背叛",
+    "关键反转"
+  ],
+  "theme": "人性与生存",
+  "createdAt": "2026-06-23T05:07:24.432Z"
+}

@@ -39,6 +39,38 @@ export async function getPages(
 export async function newConversation(page: Page, cfg: BaseConfig): Promise<void> {
   await page.goto(cfg.gptUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await sleep(2000);
+
+  await page
+    .waitForSelector(
+      '#prompt-textarea, textarea[name="prompt-textarea"], [data-testid="composer-input"]',
+      { timeout: 5000 },
+    )
+    .catch(async () => {
+      const startBtns = [
+        'button[data-testid="start-chat-button"]',
+        'button[data-testid="chat-button"]',
+        'button[aria-label*="对话"]',
+        'button[aria-label*="start"]',
+        'button[aria-label*="Start"]',
+        'button:has-text("开始对话")',
+        'button:has-text("开始")',
+        'button:has-text("Chat")',
+        'button:has-text("对话")',
+      ];
+      for (const sel of startBtns) {
+        try {
+          const btn = await page.$(sel);
+          if (btn && (await btn.isVisible())) {
+            await btn.click();
+            await sleep(3000);
+            break;
+          }
+        } catch {
+          /* try next selector */
+        }
+      }
+    });
+
   await page
     .waitForSelector(
       '#prompt-textarea, textarea[name="prompt-textarea"], [data-testid="composer-input"]',

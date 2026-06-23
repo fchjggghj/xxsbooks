@@ -12,6 +12,16 @@
       "itemsPerConversation": 100
     },
     {
+      "id": "step1_5_direction",
+      "name": "改编方向",
+      "entryUrl": "https://chatgpt.com/g/g-6a31e876bd7c8191a99c41e4d53b3395-gai",
+      "inputDir": "data/01_broken_outlines",
+      "outputDir": "data/04_directions",
+      "contextScope": "novel",
+      "itemsPerConversation": 999999,
+      "note": "分析小说世界剧情，输出改编方向建议"
+    },
+    {
       "id": "step2_adapt",
       "name": "改编大纲",
       "entryUrl": "https://chatgpt.com/g/g-6a31e876bd7c8191a99c41e4d53b3395-gai",
@@ -19,13 +29,29 @@
       "outputDir": "data/02_adapted",
       "contextScope": "novel",
       "itemsPerConversation": 999999,
-      "note": "需要上下文：同一本小说保持同一个会话完成"
+      "note": "需要上下文：结合改编方向，同一本小说保持同一个会话完成"
     },
     {
-      "id": "step3_generate",
+      "id": "step2_5_pool",
+      "name": "大纲池",
+      "inputDir": "data/02_adapted",
+      "outputDir": "data/05_outline_pool",
+      "contextScope": "task",
+      "note": "按题材分类存储改编后的大纲"
+    },
+    {
+      "id": "step3_composer",
+      "name": "新书组稿",
+      "inputDir": "data/05_outline_pool",
+      "outputDir": "data/06_new_books",
+      "contextScope": "task",
+      "note": "从大纲池选取题材相近的大纲组合成新书"
+    },
+    {
+      "id": "step4_generate",
       "name": "生成正文",
       "entryUrl": "https://chatgpt.com/g/g-69fcd66363e08191b7089e3f1d124aab-zheng-wen",
-      "inputDir": "data/02_adapted",
+      "inputDir": "data/06_new_books",
       "outputDir": "data/03_final_text",
       "contextScope": "novel",
       "itemsPerConversation": 999999,

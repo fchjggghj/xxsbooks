@@ -6,3 +6,7 @@ export * from './utils.js';
 export * from './config.js';
 export * from './files.js';
 export * from './chatgpt.js';
+export * from './library.js';
+export * from './direction.js';
+export * from './pool.js';
+export * from './composer.js';

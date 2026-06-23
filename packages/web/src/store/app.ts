@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type TabKey = 'dash' | 'queue' | 'config' | 'logs' | 'books';
+export type TabKey = 'dash' | 'queue' | 'config' | 'logs' | 'books' | 'library' | 'direction' | 'pool' | 'composer';
 
 /** 任务 ID（对应后端 TASK_DIRS） */
 export type TaskId = 'outline' | 'adapt' | 'generate';

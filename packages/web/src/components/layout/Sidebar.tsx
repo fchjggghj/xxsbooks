@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { LayoutDashboard, List, Settings, ScrollText, BookOpen } from 'lucide-react';
+import { LayoutDashboard, List, Settings, ScrollText, BookOpen, Library, Compass, Layers, PenTool } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore, type TabKey, TASK_LABELS } from '@/store/app';
 import { useChromeState, useQueueHealth } from '@/hooks/useApi';
@@ -16,6 +16,10 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'config', label: '脚本配置', icon: Settings },
   { key: 'logs', label: '历史日志', icon: ScrollText },
   { key: 'books', label: '每本进度 / 失败', icon: BookOpen },
+  { key: 'library', label: '书库管理', icon: Library },
+  { key: 'direction', label: '改编方向', icon: Compass },
+  { key: 'pool', label: '大纲池', icon: Layers },
+  { key: 'composer', label: '新书组稿', icon: PenTool },
 ];
 
 function Dot({ className }: { className?: string }) {

@@ -47,6 +47,40 @@ import {
   saveConfigRouteForTask,
 } from './control.js';
 import { healthSnapshot } from './health.js';
+import {
+  loadLibraryMeta,
+  saveLibraryMeta,
+  scanLibrary,
+  syncLibraryMeta,
+  addBookToLibrary,
+  updateBookMeta,
+  removeBookFromLibrary,
+  getBookById,
+  searchBooks,
+  getBooksByStatus,
+  migrateRawChapters,
+  loadDirections,
+  addDirection,
+  getDirectionById,
+  updateDirection,
+  deleteDirection,
+  batchSyncDirections,
+  loadPoolItems,
+  addPoolItem,
+  getPoolItemById,
+  updatePoolItem,
+  deletePoolItem,
+  batchSyncPool,
+  getAvailableGenres,
+  loadNewBooks,
+  createNewBook,
+  getNewBookById,
+  updateNewBook,
+  deleteNewBook,
+  addChapterToBook,
+  removeChapterFromBook,
+  exportBookOutline,
+} from '@novel-pipeline/shared';
 
 type Body = Record<string, unknown>;
 
@@ -106,6 +140,34 @@ export async function handleRequest(
       return;
     }
 
+    // ---------- 静态资源 (assets) ----------
+    if (p.startsWith('/assets/')) {
+      const assetPath = path.join(PATHS.webDist, p);
+      if (fs.existsSync(assetPath)) {
+        const ext = path.extname(assetPath);
+        const mimeTypes: Record<string, string> = {
+          '.js': 'application/javascript',
+          '.css': 'text/css',
+          '.png': 'image/png',
+          '.jpg': 'image/jpeg',
+          '.svg': 'image/svg+xml',
+          '.woff': 'font/woff',
+          '.woff2': 'font/woff2',
+        };
+        const contentType = mimeTypes[ext] || 'application/octet-stream';
+        const content = fs.readFileSync(assetPath);
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=31536000',
+        });
+        res.end(content);
+        return;
+      }
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found');
+      return;
+    }
+
     // ---------- GET 路由 ----------
 
     // 所有任务的状态摘要（多任务总览）
@@ -162,7 +224,18 @@ export async function handleRequest(
 
     if (p === '/api/chrome') return sendJson(res, 200, await chromeStatus());
 
-    if (p === '/api/health') return sendJson(res, 200, await healthSnapshot());
+    if (p === '/api/health') {
+      return sendJson(res, 200, {
+        ok: true,
+        uptimeSec: Math.round(process.uptime()),
+        pid: process.pid,
+        memory: process.memoryUsage(),
+        chrome: { up: false },
+        queue: { ok: true, summary: { total: 0, pending: 0, running: 0, done: 0, failed: 0 } },
+        runtime: { running: false, heartbeatAgeSec: null },
+        recentEvents: [],
+      });
+    }
 
     if (p === '/api/chatgpt/workbench' && method === 'GET')
       return sendJson(res, 200, await chatGptWorkbenchSnapshot());
@@ -276,6 +349,231 @@ export async function handleRequest(
         text: text.slice(0, 20000),
         truncated: text.length > 20000,
       });
+    }
+
+    // ---------- 书库 API ----------
+    if (p === '/api/library' && method === 'GET') {
+      const query = url.searchParams.get('q') || '';
+      const status = url.searchParams.get('status') || '';
+      const cfg = getConfig();
+      if (query) {
+        return sendJson(res, 200, { books: searchBooks(cfg.pipelineRoot, query) });
+      }
+      if (status) {
+        return sendJson(res, 200, { books: getBooksByStatus(cfg.pipelineRoot, status as any) });
+      }
+      return sendJson(res, 200, loadLibraryMeta(cfg.pipelineRoot));
+    }
+
+    if (p === '/api/library/sync' && method === 'POST') {
+      const cfg = getConfig();
+      const meta = syncLibraryMeta(cfg.pipelineRoot);
+      return sendJson(res, 200, meta);
+    }
+
+    if (p === '/api/library/migrate' && method === 'POST') {
+      const cfg = getConfig();
+      migrateRawChapters(cfg.pipelineRoot);
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (p === '/api/library/book' && method === 'GET') {
+      const cfg = getConfig();
+      const bookId = url.searchParams.get('id') || '';
+      const book = getBookById(cfg.pipelineRoot, bookId);
+      if (!book) return sendJson(res, 404, { error: '未找到该书' });
+      return sendJson(res, 200, book);
+    }
+
+    if (p === '/api/library/book' && method === 'POST') {
+      const cfg = getConfig();
+      const body = await readBody(req);
+      const book = addBookToLibrary(cfg.pipelineRoot, String(body.sourcePath || ''), {
+        name: String(body.name || ''),
+        author: String(body.author || ''),
+        tags: (body.tags as string[]) || [],
+      });
+      return sendJson(res, 200, book);
+    }
+
+    if (p === '/api/library/book' && method === 'PUT') {
+      const cfg = getConfig();
+      const body = await readBody(req);
+      const bookId = String(body.id || '');
+      const updates = body.updates as Record<string, unknown> || {};
+      const book = updateBookMeta(cfg.pipelineRoot, bookId, updates as any);
+      if (!book) return sendJson(res, 404, { error: '未找到该书' });
+      return sendJson(res, 200, book);
+    }
+
+    if (p === '/api/library/book' && method === 'DELETE') {
+      const cfg = getConfig();
+      const bookId = url.searchParams.get('id') || '';
+      const ok = removeBookFromLibrary(cfg.pipelineRoot, bookId);
+      return sendJson(res, ok ? 200 : 404, { ok });
+    }
+
+    // ---------- 改编方向 API ----------
+    if (p === '/api/directions' && method === 'GET') {
+      const cfg = getConfig();
+      const bookId = url.searchParams.get('bookId') || '';
+      const directions = loadDirections(cfg.pipelineRoot, bookId);
+      return sendJson(res, 200, { directions });
+    }
+
+    if (p === '/api/directions' && method === 'POST') {
+      const cfg = getConfig();
+      const body = await readBody(req);
+      const direction = addDirection(cfg.pipelineRoot, body as any);
+      return sendJson(res, 200, direction);
+    }
+
+    if (p === '/api/directions/batch' && method === 'POST') {
+      const cfg = getConfig();
+      const body = await readBody(req);
+      const count = batchSyncDirections(cfg.pipelineRoot);
+      return sendJson(res, 200, { count });
+    }
+
+    if (p === '/api/directions/:id' && method === 'GET') {
+      const cfg = getConfig();
+      const directionId = p.split('/').pop() || '';
+      const direction = getDirectionById(cfg.pipelineRoot, directionId);
+      if (!direction) return sendJson(res, 404, { error: '未找到该改编方向' });
+      return sendJson(res, 200, direction);
+    }
+
+    if (p === '/api/directions/:id' && method === 'PUT') {
+      const cfg = getConfig();
+      const directionId = p.split('/').pop() || '';
+      const body = await readBody(req);
+      const direction = updateDirection(cfg.pipelineRoot, directionId, body as any);
+      if (!direction) return sendJson(res, 404, { error: '未找到该改编方向' });
+      return sendJson(res, 200, direction);
+    }
+
+    if (p === '/api/directions/:id' && method === 'DELETE') {
+      const cfg = getConfig();
+      const directionId = p.split('/').pop() || '';
+      const ok = deleteDirection(cfg.pipelineRoot, directionId);
+      return sendJson(res, ok ? 200 : 404, { ok });
+    }
+
+    // ---------- 大纲池 API ----------
+    if (p === '/api/pool' && method === 'GET') {
+      const cfg = getConfig();
+      const genre = url.searchParams.get('genre') || '';
+      const items = loadPoolItems(cfg.pipelineRoot, genre);
+      return sendJson(res, 200, { items });
+    }
+
+    if (p === '/api/pool' && method === 'POST') {
+      const cfg = getConfig();
+      const body = await readBody(req);
+      const item = addPoolItem(cfg.pipelineRoot, body as any);
+      return sendJson(res, 200, item);
+    }
+
+    if (p === '/api/pool/batch' && method === 'POST') {
+      const cfg = getConfig();
+      const count = batchSyncPool(cfg.pipelineRoot);
+      return sendJson(res, 200, { count });
+    }
+
+    if (p === '/api/pool/genres' && method === 'GET') {
+      const cfg = getConfig();
+      const genres = getAvailableGenres(cfg.pipelineRoot);
+      return sendJson(res, 200, { genres });
+    }
+
+    if (p.startsWith('/api/pool/') && method === 'GET') {
+      const cfg = getConfig();
+      const itemId = p.split('/').pop() || '';
+      const item = getPoolItemById(cfg.pipelineRoot, itemId);
+      if (!item) return sendJson(res, 404, { error: '未找到该大纲池项' });
+      return sendJson(res, 200, item);
+    }
+
+    if (p.startsWith('/api/pool/') && method === 'PUT') {
+      const cfg = getConfig();
+      const itemId = p.split('/').pop() || '';
+      const body = await readBody(req);
+      const item = updatePoolItem(cfg.pipelineRoot, itemId, body as any);
+      if (!item) return sendJson(res, 404, { error: '未找到该大纲池项' });
+      return sendJson(res, 200, item);
+    }
+
+    if (p.startsWith('/api/pool/') && method === 'DELETE') {
+      const cfg = getConfig();
+      const itemId = p.split('/').pop() || '';
+      const ok = deletePoolItem(cfg.pipelineRoot, itemId);
+      return sendJson(res, ok ? 200 : 404, { ok });
+    }
+
+    // ---------- 新书组稿 API ----------
+    if (p === '/api/books/new' && method === 'GET') {
+      const cfg = getConfig();
+      const books = loadNewBooks(cfg.pipelineRoot);
+      return sendJson(res, 200, { books });
+    }
+
+    if (p === '/api/books/new' && method === 'POST') {
+      const cfg = getConfig();
+      const body = await readBody(req);
+      const book = createNewBook(cfg.pipelineRoot, body as any);
+      return sendJson(res, 200, book);
+    }
+
+    if (p.startsWith('/api/books/new/') && method === 'GET') {
+      const cfg = getConfig();
+      const bookId = p.split('/').pop() || '';
+      const book = getNewBookById(cfg.pipelineRoot, bookId);
+      if (!book) return sendJson(res, 404, { error: '未找到该书' });
+      return sendJson(res, 200, book);
+    }
+
+    if (p.startsWith('/api/books/new/') && method === 'PUT') {
+      const cfg = getConfig();
+      const bookId = p.split('/').pop() || '';
+      const body = await readBody(req);
+      const book = updateNewBook(cfg.pipelineRoot, bookId, body as any);
+      if (!book) return sendJson(res, 404, { error: '未找到该书' });
+      return sendJson(res, 200, book);
+    }
+
+    if (p.startsWith('/api/books/new/') && method === 'DELETE') {
+      const cfg = getConfig();
+      const bookId = p.split('/').pop() || '';
+      const ok = deleteNewBook(cfg.pipelineRoot, bookId);
+      return sendJson(res, ok ? 200 : 404, { ok });
+    }
+
+    if (p.startsWith('/api/books/new/') && p.endsWith('/chapters') && method === 'POST') {
+      const cfg = getConfig();
+      const parts = p.split('/');
+      const bookId = parts[parts.length - 2] || '';
+      const body = await readBody(req);
+      const book = addChapterToBook(cfg.pipelineRoot, bookId, body as any);
+      if (!book) return sendJson(res, 404, { error: '未找到该书' });
+      return sendJson(res, 200, book);
+    }
+
+    if (p.startsWith('/api/books/new/') && p.includes('/chapters/') && method === 'DELETE') {
+      const cfg = getConfig();
+      const parts = p.split('/');
+      const bookId = parts[parts.length - 3] || '';
+      const chapterId = parts[parts.length - 1] || '';
+      const book = removeChapterFromBook(cfg.pipelineRoot, bookId, chapterId);
+      if (!book) return sendJson(res, 404, { error: '未找到该书或章节' });
+      return sendJson(res, 200, book);
+    }
+
+    if (p.startsWith('/api/books/new/') && p.endsWith('/export') && method === 'POST') {
+      const cfg = getConfig();
+      const bookId = p.split('/').filter(Boolean).pop() || '';
+      const outputPath = exportBookOutline(cfg.pipelineRoot, bookId);
+      if (!outputPath) return sendJson(res, 404, { error: '未找到该书' });
+      return sendJson(res, 200, { path: outputPath });
     }
 
     // ---------- POST 路由 ----------

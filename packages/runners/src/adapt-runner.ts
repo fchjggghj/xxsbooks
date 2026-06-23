@@ -144,6 +144,8 @@ function extractStoryArc(name: string): string {
   s = s.replace(/[（(][^（(）)]*[）)]\s*$/, '');
   // 去掉末尾的数字
   s = s.replace(/\d+$/, '');
+  // 统一字符：× → x，全角括号 → 半角括号等
+  s = s.replace(/×/g, 'x').replace(/（/g, '(').replace(/）/g, ')');
   // 去掉末尾空格
   return s.trim();
 }
@@ -154,24 +156,38 @@ interface StoryArc {
   items: OutlineItem[];
 }
 
+function isExtraChapter(name: string): boolean {
+  const arc = extractStoryArc(name);
+  return arc.includes('番外') || arc.includes('番外篇') || arc.includes('外传');
+}
+
 /**
  * 按剧情线分组章节（保持原始顺序）。
  *
- * 同一剧情线的章节分到一组，番外等独立名称各自成组。
+ * 同一剧情线的章节分到一组，番外合并到前面最近的正文剧情线。
  */
 function groupByStoryArc(outlines: OutlineItem[]): StoryArc[] {
   const groups: StoryArc[] = [];
-  const arcMap = new Map<string, OutlineItem[]>();
+  let lastNonExtraArc: string | null = null;
 
   for (const o of outlines) {
     const arc = extractStoryArc(o.name);
-    let arr = arcMap.get(arc);
-    if (!arr) {
-      arr = [];
-      arcMap.set(arc, arr);
-      groups.push({ arc, items: arr });
+    let targetArc = arc;
+
+    if (isExtraChapter(o.name)) {
+      if (lastNonExtraArc) {
+        targetArc = lastNonExtraArc;
+      }
+    } else {
+      lastNonExtraArc = arc;
     }
-    arr.push(o);
+
+    const existingGroup = groups.find((g) => g.arc === targetArc);
+    if (existingGroup) {
+      existingGroup.items.push(o);
+    } else {
+      groups.push({ arc: targetArc, items: [o] });
+    }
   }
 
   return groups;
@@ -323,7 +339,7 @@ async function run(cfg: AdaptConfig, dryRun: boolean): Promise<RunResult> {
   console.log('__PENDING__=' + pendingOutlines);
 
   const concurrency = Math.max(1, Number(cfg.concurrency ?? 1));
-  const batchSize = 10; // 每个剧情世界每10章一批，不重叠
+  const batchSize = 1; // 逐章处理
 
   console.log('==================== 改编大纲处理计划 ====================');
   console.log(`输入目录    : ${cfg.inputRoot}`);
