@@ -1,181 +1,180 @@
-# Novel Pipeline
+# GPTS 小说队列工具
 
-小说流水线系统：下载 → 拆大纲 → 改编 → 写正文
+这是一个本地批量队列工具，用 Chrome 自动化把小说章节按顺序发送给 ChatGPT GPTS，并把回复保存到本地文件。
 
-一个基于 AI 的小说二次创作自动化流水线，支持从原始小说下载到正文生成的完整工作流。
+默认流程分两段：
 
-## 功能特性
+1. `拆大纲 GPTS`：`input` 原文章节 -> `output/01_dagang`
+2. `正文 GPTS`：`output/01_dagang` 大纲 -> `output/02_zhengwen`
 
-### 核心工作流
+## 适合谁
 
-1. **书库管理** - 导入和管理多本原始小说
-2. **大纲拆解** - 将小说章节拆分为结构化大纲，包含关键事件、因果关系、人物行为
-3. **改编方向** - 为每个剧情世界生成改编方向，包含核心冲突、人物设定、基调等
-4. **大纲改编** - 根据改编方向对原始大纲进行二次创作
-5. **大纲池** - 汇聚所有改编大纲，按主题分类
-6. **新书组稿** - 将大纲池中的内容按相似主题组合成新书
-7. **正文生成** - 根据改编大纲生成完整的小说正文
+适合需要批量处理多本小说的人，尤其是这种固定流程：
 
-### 技术特点
-
-- **双 AI 引擎支持** - 支持 ChatGPT (通过 CDP 自动化) 和 DeepSeek API
-- **会话持久化** - 对话 URL 自动保存，重启后恢复上下文
-- **智能重试机制** - 失败章节自动重试，第 2 次起等待 5 分钟
-- **批次处理** - 剧情世界按 10 章一批不重叠切分
-- **质量控制** - 包含写作底线、人味硬约束、GPT 指纹禁令
-
-## 技术栈
-
-| 层级 | 技术 |
-|------|------|
-| 语言 | TypeScript |
-| 前端 | React + Vite + Tailwind CSS v4 |
-| 后端 | Node.js + Koa |
-| 包管理 | pnpm workspace |
-| 测试 | Vitest |
-| AI 驱动 | ChatGPT (CDP) + DeepSeek API |
-
-## 项目结构
-
-```
-novel-pipeline/
-├── packages/
-│   ├── shared/          # 共享工具和类型定义
-│   ├── runners/         # 核心 Runner（拆大纲/改编/正文生成）
-│   ├── server/          # API 服务端
-│   ├── web/             # 前端界面
-│   └── orchestrator/    # 流水线编排器
-├── data/                # 数据目录
-│   ├── library/         # 原始小说库
-│   ├── 01_5_directions/ # 改编方向
-│   ├── 02_5_pool/       # 大纲池
-│   └── 03_composed/     # 组稿新书
-└── coverage/            # 测试覆盖率报告
-```
+- 一本小说有多个章节。
+- 每章按顺序发送给 GPTS。
+- 上一章成功输出后，才允许发送下一章。
+- 当前章节失败时，停在当前章节，不跳过、不乱序。
+- 每本小说使用独立 GPTS 对话，避免不同小说上下文混在一起。
 
 ## 安装
 
-```bash
-# 安装依赖
-pnpm install
+需要 Node.js 20 或更高版本，以及 Google Chrome。
 
-# 构建所有包
-pnpm build
+```powershell
+npm install
 ```
 
-## 快速开始
+## 启动 Chrome 自动化环境
 
-### 启动服务
+先启动专用 Chrome：
 
-```bash
-# 启动后端服务
-pnpm start:server
-
-# 访问前端页面
-# http://localhost:8787
+```powershell
+npm run chrome
 ```
 
-### 开发模式
+它会使用：
 
-```bash
-# 同时启动前端和后端开发服务器
-pnpm dev:all
-
-# 或分别启动
-pnpm dev                    # 前端
-pnpm dev:server             # 后端
+```text
+CDP: http://127.0.0.1:9222
+Profile: C:\chrome-automation
 ```
 
-## 使用说明
+第一次使用时，在打开的 Chrome 里登录 ChatGPT。之后不要删除 `C:\chrome-automation`，登录状态会复用。
 
-### 流水线命令
+## 输入目录
 
-```bash
-# 运行完整流水线
-pnpm pipeline
+推荐格式是：每本小说一个文件夹，每章一个文件。
 
-# 仅拆大纲
-pnpm outline
-
-# 仅改编大纲
-pnpm adapt
-
-# 仅生成正文
-pnpm generate
-
-# 查看状态
-pnpm status
-
-# 试运行模式（不实际调用 AI）
-pnpm pipeline:dry
-pnpm outline:dry
-pnpm adapt:dry
-pnpm generate:dry
+```text
+input/
+  小说A/
+    001.txt
+    002.txt
+    003.txt
+  小说B/
+    001.txt
+    002.txt
 ```
 
-### 开发命令
+文件名建议用补零编号，例如 `001.txt`、`002.txt`，这样排序最稳定。
 
-```bash
-# 类型检查
-pnpm typecheck
+根目录下的单个 `.txt` 也能跑，但只建议测试用。正式批量处理请使用小说文件夹。
 
-# 代码检查
-pnpm lint
+## 运行
 
-# 格式化代码
-pnpm format
+预览队列，不发送给 GPTS：
 
-# 运行测试
-pnpm test
-pnpm test:run
+```powershell
+npm run pipeline:dry
 ```
 
-## API 接口
+完整运行两段流程：
 
-| 接口 | 方法 | 描述 |
-|------|------|------|
-| `/api/health` | GET | 健康检查 |
-| `/api/library` | GET/POST | 书库管理 |
-| `/api/directions` | GET | 改编方向列表 |
-| `/api/pool` | GET | 大纲池 |
-| `/api/books/new` | GET | 组稿新书列表 |
-| `/api/chrome` | GET/POST | Chrome 控制 |
-| `/api/queue` | GET | 任务队列 |
-| `/api/logs` | GET | 日志查询 |
-
-## 配置
-
-配置文件位于各 package 的 `config.json`，主要配置项：
-
-- `cdpUrl`: Chrome DevTools Protocol 地址
-- `gptUrl`: ChatGPT 页面地址
-- `pipelineRoot`: 流水线数据根目录
-- `maxChapters`: 最大处理章节数
-- `concurrency`: 并发数
-- `aiProvider`: AI 提供商 (`chatgpt` 或 `deepseek`)
-
-### Chrome 启动参数
-
-```
-chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\chrome-automation
+```powershell
+npm run pipeline
 ```
 
-## 预置数据
+也可以分开跑：
 
-项目包含以下预置数据用于测试：
+```powershell
+npm run dagang
+npm run zhengwen
+```
 
-- **3 本原始小说** - 位于 `data/library/`
-- **16 个改编方向** - 位于 `data/01_5_directions/`
-- **大纲池** - 位于 `data/02_5_pool/`
-- **3 本组稿新书** - 位于 `data/03_composed/`
+## 默认队列规则
 
-## 开发规范
+当前固定策略：
 
-- 代码使用 TypeScript 严格模式
-- 测试文件命名为 `[module].test.ts`，与源文件同目录
-- 日志使用彩色输出
-- 文件操作使用原子写入（先写 tmp，再 rename）
+```json
+{
+  "chaptersPerPrompt": 1,
+  "conversationScope": "novel",
+  "retryMode": "edit-and-resend",
+  "maxRetries": 2
+}
+```
 
-## 许可证
+含义：
 
-MIT License
+- `chaptersPerPrompt: 1`：每章一个 prompt。
+- `conversationScope: "novel"`：每本小说一个独立 GPTS 对话。
+- `retryMode: "edit-and-resend"`：失败后优先编辑当前失败消息并重新发送。
+- `maxRetries: 2`：当前章节最多自动重试 2 次。
+
+不会按 prompt 数量换对话。只有进入下一本小说时，才会打开新的 GPTS 对话。
+
+## 失败恢复
+
+队列是严格顺序执行的：
+
+```text
+小说A/001.txt -> 成功
+小说A/002.txt -> 成功
+小说A/003.txt -> 失败，停止
+小说A/004.txt -> 不会发送
+小说B/001.txt -> 不会发送
+```
+
+修复问题后重新运行同一个命令，会从失败章节继续。
+
+状态文件保存在：
+
+```text
+output/01_dagang/state.json
+output/02_zhengwen/state.json
+```
+
+日志保存在：
+
+```text
+output/01_dagang/run.log
+output/02_zhengwen/run.log
+```
+
+这些都是运行产物，不建议提交到仓库。
+
+## 配置 GPTS
+
+两个阶段的 GPTS 地址在这里：
+
+```text
+config-dagang.json
+config-zhengwen.json
+```
+
+如果你要换成自己的 GPTS，改里面的 `gptUrl` 即可。
+
+## 输出目录
+
+拆大纲输出：
+
+```text
+output/01_dagang/小说A/001.md
+```
+
+正文输出：
+
+```text
+output/02_zhengwen/小说A/001.md
+```
+
+## 常用命令
+
+```powershell
+npm run chrome        # 启动/复用自动化 Chrome
+npm run pipeline:dry  # 预览两段队列
+npm run pipeline      # 运行拆大纲 + 正文
+npm run dagang        # 只跑拆大纲
+npm run zhengwen      # 只跑正文
+npm run check         # 检查脚本语法
+```
+
+## 发布仓库前
+
+建议确认：
+
+- `input` 里没有真实小说。
+- `output` 里没有生成结果、状态文件、日志。
+- `config-*.json` 里的 GPTS 地址是否允许别人使用。
+- Chrome 登录目录 `C:\chrome-automation` 不属于仓库，不需要提交。

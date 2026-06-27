@@ -1,0 +1,22 @@
+{
+  "cdpUrl": "http://127.0.0.1:9222",
+  "gptUrl": "https://chatgpt.com/g/g-69fcd66363e08191b7089e3f1d124aab-zheng-wen",
+  "inputDir": "output/01_dagang",
+  "outputDir": "output/02_zhengwen",
+  "fileExtensions": [".txt", ".md"],
+  "recursive": true,
+  "skipExisting": true,
+  "outputExtension": ".md",
+  "promptTemplate": "{{content}}",
+  "chaptersPerPrompt": 1,
+  "conversationScope": "novel",
+  "retryMode": "edit-and-resend",
+  "maxRetries": 2,
+  "includeFileHeaders": false,
+  "stateFile": "output/02_zhengwen/state.json",
+  "logFile": "output/02_zhengwen/run.log",
+  "waitReplyTimeoutMs": 180000,
+  "replyStableMs": 2500,
+  "betweenItemsMs": 2000,
+  "minReplyChars": 80
+}

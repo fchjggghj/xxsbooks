@@ -1,0 +1,22 @@
+{
+  "cdpUrl": "http://127.0.0.1:9222",
+  "gptUrl": "https://chatgpt.com/g/g-6a008fa0c5208191baf690ede768a20c-chai-da-gang",
+  "inputDir": "input",
+  "outputDir": "output/01_dagang",
+  "fileExtensions": [".txt", ".md"],
+  "recursive": true,
+  "skipExisting": true,
+  "outputExtension": ".md",
+  "promptTemplate": "{{content}}",
+  "chaptersPerPrompt": 1,
+  "conversationScope": "novel",
+  "retryMode": "edit-and-resend",
+  "maxRetries": 2,
+  "includeFileHeaders": false,
+  "stateFile": "output/01_dagang/state.json",
+  "logFile": "output/01_dagang/run.log",
+  "waitReplyTimeoutMs": 180000,
+  "replyStableMs": 2500,
+  "betweenItemsMs": 2000,
+  "minReplyChars": 80
+}
