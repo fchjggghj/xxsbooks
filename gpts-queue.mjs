@@ -441,9 +441,24 @@ async function isGenerating(page) {
 }
 
 async function openNewConversation(page, cfg) {
-  await page.goto(cfg.gptUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await closeOverlays(page);
-  await firstComposer(page, 90000);
+  // 开新对话是薄弱环节：goto 到 GPTS 介绍页后，React 状态可能未初始化好，
+  // 插入文本并点击发送会被框架忽略。加载后先 reload 一次让 React 重新初始化。
+  // goto / reload / firstComposer 任一步失败时重试，最多尝试 3 次。
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await page.goto(cfg.gptUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      // 关键：刷新页面让 React 重新初始化输入框状态，否则插入文本后发送无效。
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+      await closeOverlays(page);
+      await firstComposer(page, 90000);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 3) await page.waitForTimeout(3000);
+    }
+  }
+  throw lastErr;
 }
 
 async function openExistingConversation(page, url) {
@@ -486,6 +501,18 @@ async function setEditableText(page, locator, text) {
   for (let i = 0; i < text.length; i += chunkSize) {
     await page.keyboard.insertText(text.slice(i, i + chunkSize));
   }
+
+  // 关键：keyboard.insertText 只改 DOM，不触发 React/ProseMirror 的 input 事件，
+  // 导致框架内部状态认为输入为空，发送按钮点击无效。
+  // 主动 dispatch InputEvent 让框架同步状态。
+  await locator.evaluate((el) => {
+    el.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertText',
+      data: null,
+    }));
+  });
 }
 
 async function insertPrompt(page, prompt) {
@@ -522,7 +549,16 @@ async function clickSend(page) {
 
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
-    if (await tryClickButton()) return;
+    if (await tryClickButton()) {
+      // 点击后等待输入框清空（发送成功的标志），最多等 3 秒。
+      await page.waitForTimeout(500);
+      const cleared = await page.evaluate(() => {
+        const el = document.querySelector('#prompt-textarea') || document.querySelector('div[contenteditable="true"][role="textbox"]');
+        return !el || (el.textContent || '').trim().length === 0;
+      });
+      if (cleared) return;
+      // 输入框未清空，说明发送未生效，继续重试。
+    }
     await page.waitForTimeout(300);
   }
 
