@@ -1,0 +1,25 @@
+﻿{
+    "conversationScope":  "novel",
+    "replyStableMs":  3500,
+    "waitReplyTimeoutMs":  300000,
+    "outputExtension":  ".md",
+    "recursive":  true,
+    "includeFileHeaders":  false,
+    "fileExtensions":  [
+                           ".txt",
+                           ".md"
+                       ],
+    "minReplyChars":  80,
+    "retryMode":  "edit-and-resend",
+    "cdpUrl":  "http://127.0.0.1:9222",
+    "stateFile":  "output_test/03_zhengwen/state.json",
+    "inputDir":  "output_test/02_adapt",
+    "maxRetries":  2,
+    "chaptersPerPrompt":  1,
+    "skipExisting":  true,
+    "logFile":  "output_test/03_zhengwen/run.log",
+    "promptTemplate":  "{{content}}",
+    "gptUrl":  "https://chatgpt.com/g/g-69fcd66363e08191b7089e3f1d124aab-zheng-wen",
+    "betweenItemsMs":  2000,
+    "outputDir":  "output_test/03_zhengwen"
+}

@@ -12,6 +12,7 @@ const DEFAULT_CONFIG = {
   recursive: true,
   skipExisting: true,
   outputExtension: '.md',
+  promptPrefixFile: '',
   promptTemplate: '{{content}}',
   chaptersPerPrompt: 1,
   conversationScope: 'novel',
@@ -19,6 +20,7 @@ const DEFAULT_CONFIG = {
   maxRetries: 2,
   waitReplyTimeoutMs: 180000,
   replyStableMs: 2500,
+  maxStableGeneratingMs: 45000,
   betweenItemsMs: 2000,
   minReplyChars: 80,
   includeFileHeaders: false,
@@ -122,6 +124,11 @@ async function loadConfig(configPath, projectRoot) {
   cfg.logFile = cfg.logFile
     ? resolveFromRoot(projectRoot, cfg.logFile)
     : path.join(cfg.outputDir, '.gpts-queue.log');
+  if (cfg.promptPrefixFile) {
+    cfg.promptPrefixFile = resolveFromRoot(projectRoot, cfg.promptPrefixFile);
+    const prefix = (await fs.readFile(cfg.promptPrefixFile, 'utf8')).replace(/^\uFEFF/, '').trim();
+    cfg.promptTemplate = `${prefix}\n\n${String(cfg.promptTemplate || '{{content}}')}`;
+  }
   return cfg;
 }
 
@@ -511,7 +518,7 @@ async function clickVisible(page, selectors, timeoutMs = 8000) {
 async function editLastUserPrompt(page, prompt) {
   const userMessages = page.locator(USER_SELECTOR);
   if ((await userMessages.count()) === 0) {
-    throw new Error('Cannot edit previous prompt: no user message found in this conversation.');
+    return false;
   }
 
   const lastUser = userMessages.last();
@@ -544,7 +551,7 @@ async function editLastUserPrompt(page, prompt) {
   }
 
   if (!editClicked) {
-    throw new Error('Cannot edit previous prompt: edit button was not found.');
+    return false;
   }
 
   const scopedEditor = lastUser
@@ -575,6 +582,8 @@ async function editLastUserPrompt(page, prompt) {
       await page.keyboard.press('Enter');
     });
   });
+
+  return true;
 }
 
 async function waitForReply(page, beforeTexts, cfg) {
@@ -596,11 +605,16 @@ async function waitForReply(page, beforeTexts, cfg) {
     }
 
     const stableMs = stableSince ? Date.now() - stableSince : 0;
-    if (
+    const enoughReply =
       changed &&
       text.length >= Number(cfg.minReplyChars || 80) &&
-      stableMs >= Number(cfg.replyStableMs || 2500) &&
-      !(await isGenerating(page))
+      stableMs >= Number(cfg.replyStableMs || 2500);
+    const stableWhileGeneratingMs = Number(cfg.maxStableGeneratingMs || 0);
+    const generationLooksStuck =
+      stableWhileGeneratingMs > 0 && stableMs >= stableWhileGeneratingMs;
+    if (
+      enoughReply &&
+      (generationLooksStuck || !(await isGenerating(page)))
     ) {
       return text;
     }
@@ -642,7 +656,11 @@ function renderPrompt(template, task, content) {
 async function sendOrEdit(page, cfg, task, prompt, method) {
   const beforeTexts = await assistantTexts(page);
   if (method === 'edit-and-resend') {
-    await editLastUserPrompt(page, prompt);
+    const edited = await editLastUserPrompt(page, prompt);
+    if (!edited) {
+      await insertPrompt(page, prompt);
+      await clickSend(page);
+    }
   } else {
     await insertPrompt(page, prompt);
     await clickSend(page);
@@ -823,7 +841,7 @@ async function main() {
       }
     }
   } finally {
-    await browser.close();
+    await browser.disconnect();
   }
 
   const remaining = tasks.filter((task) => {

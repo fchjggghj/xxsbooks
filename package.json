@@ -12,17 +12,23 @@
     "start": "node gpts-queue.mjs",
     "dry-run": "node gpts-queue.mjs --dry-run",
     "force": "node gpts-queue.mjs --force",
-    "pipeline": "npm run dagang && npm run zhengwen",
-    "pipeline:dry": "npm run dagang:dry && npm run zhengwen:dry",
+    "pipeline": "npm run dagang && npm run adapt && npm run split-adapt && npm run zhengwen",
+    "pipeline:dry": "npm run dagang:dry && npm run adapt:dry && npm run split-adapt:dry && npm run zhengwen:dry",
     "dagang": "node gpts-queue.mjs --config config-dagang.json",
     "dagang:dry": "node gpts-queue.mjs --config config-dagang.json --dry-run",
     "dagang:force": "node gpts-queue.mjs --config config-dagang.json --force",
     "dagang:reset": "node gpts-queue.mjs --config config-dagang.json --reset-state --dry-run",
+    "adapt": "node gpts-queue.mjs --config config-adapt.json",
+    "adapt:dry": "node gpts-queue.mjs --config config-adapt.json --dry-run",
+    "adapt:force": "node gpts-queue.mjs --config config-adapt.json --force",
+    "adapt:reset": "node gpts-queue.mjs --config config-adapt.json --reset-state --dry-run",
+    "split-adapt": "node scripts/split-adapt-chapters.mjs",
+    "split-adapt:dry": "node scripts/split-adapt-chapters.mjs --dry-run",
     "zhengwen": "node gpts-queue.mjs --config config-zhengwen.json",
     "zhengwen:dry": "node gpts-queue.mjs --config config-zhengwen.json --dry-run",
     "zhengwen:force": "node gpts-queue.mjs --config config-zhengwen.json --force",
     "zhengwen:reset": "node gpts-queue.mjs --config config-zhengwen.json --reset-state --dry-run",
-    "check": "node --check gpts-queue.mjs"
+    "check": "node --check gpts-queue.mjs && node --check scripts/split-adapt-chapters.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.49.0"
