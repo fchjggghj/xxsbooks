@@ -494,20 +494,46 @@ async function insertPrompt(page, prompt) {
 }
 
 async function clickSend(page) {
-  await page.waitForTimeout(500);
-  for (const selector of SEND_BUTTON_SELECTORS) {
-    try {
-      const button = page.locator(selector).last();
-      if ((await button.count()) > 0 && (await button.isVisible()) && (await button.isEnabled())) {
-        await button.click();
-        return;
+  // 发送按钮在文本刚插入时可能仍处于 disabled，需要等待框架识别输入并启用按钮。
+  const tryClickButton = async () => {
+    for (const selector of SEND_BUTTON_SELECTORS) {
+      try {
+        const button = page.locator(selector).last();
+        if ((await button.count()) > 0 && (await button.isVisible())) {
+          // 显式等按钮 enabled（最多 8 秒），insertText 后按钮启用有延迟。
+          try {
+            await button.waitFor({ state: 'attached', timeout: 1000 });
+            const enabled = await button.isEnabled();
+            if (enabled) {
+              await button.click();
+              return true;
+            }
+            continue;
+          } catch {
+            continue;
+          }
+        }
+      } catch {
+        // Try the next selector.
       }
-    } catch {
-      // Try the next selector.
     }
+    return false;
+  };
+
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    if (await tryClickButton()) return;
+    await page.waitForTimeout(300);
   }
 
-  await page.keyboard.press('Enter');
+  // Fallback：先聚焦输入框再按 Enter。
+  try {
+    const composer = await firstComposer(page, 2000);
+    await composer.click();
+    await page.keyboard.press('Enter');
+  } catch {
+    await page.keyboard.press('Enter');
+  }
 }
 
 async function clickVisible(page, selectors, timeoutMs = 8000) {
@@ -841,7 +867,7 @@ async function main() {
       }
     }
   } finally {
-    await browser.disconnect();
+    await browser.close();
   }
 
   const remaining = tasks.filter((task) => {

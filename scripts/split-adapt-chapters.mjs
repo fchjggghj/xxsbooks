@@ -72,8 +72,8 @@ function novelDirFor(inputRoot, file) {
 
 function headingRegex(strict = true) {
   return strict
-    ? /^#{1,4}\s*新第\s*([0-9一二三四五六七八九十百]+)\s*章[：:、\-\s]*(.*)$/gm
-    : /^#{1,4}\s*(?:新)?第\s*([0-9一二三四五六七八九十百]+)\s*章[：:、\-\s]*(.*)$/gm;
+    ? /^#{0,4}\s*新第\s*([0-9一二三四五六七八九十百]+)\s*章[：:、\-\s]*(.*)$/gm
+    : /^#{0,4}\s*(?:新)?第\s*([0-9一二三四五六七八九十百]+)\s*章[：:、\-\s]*(.*)$/gm;
 }
 
 function findChapterHeadings(text) {
@@ -84,7 +84,7 @@ function findChapterHeadings(text) {
 
 function findTailCut(text, start) {
   const tail = text.slice(start);
-  const match = tail.match(/^#{1,3}\s*(?:下批承接摘要|承接摘要|承接记录|批次承接摘要)\s*$/m);
+  const match = tail.match(/^#{0,3}\s*(?:下批承接摘要|承接摘要|承接记录|批次承接摘要)\s*$/m);
   return match ? start + match.index : text.length;
 }
 
