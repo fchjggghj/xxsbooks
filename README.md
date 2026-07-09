@@ -86,12 +86,12 @@ npm run zhengwen
 
 - `config-dagang.json`
   - `chaptersPerPrompt: 3`
-  - `promptPrefixFile: prompts/00A_每次输入前缀_拆原剧情细纲.md`
+  - `promptTemplate` 已内联统一前缀：`【严格按照提示词执行，注意上下文】`
   - 每次发送 3 个连续原文章节。
   - 输出到 `output/01_dagang`。
 
 - `config-adapt.json`
-  - `promptPrefixFile: prompts/00B_每次输入前缀_改编重排.md`
+  - `promptTemplate` 已内联统一前缀：`【严格按照提示词执行，注意上下文】`
   - 每次读取 1 个拆大纲批次文件。
   - 让改编 GPTS 把 3 个原章节细纲重排成 2 个新章节大纲。
   - 输出到 `output/02_adapt`。
@@ -102,7 +102,7 @@ npm run zhengwen
   - 输出单章大纲到 `output/02_adapt_chapters`。
 
 - `config-zhengwen.json`
-  - `promptPrefixFile: prompts/00C_每次输入前缀_正文生成.md`
+  - `promptTemplate` 已内联统一前缀：`【严格按照提示词执行，注意上下文】`
   - 读取 `output/02_adapt_chapters`。
   - 每次只生成 1 章正文。
   - 输出到 `output/03_zhengwen`。
@@ -127,17 +127,4 @@ npm run split-adapt
 
 ## 提示词
 
-优化后的 GPTS 提示词放在：
-
-```text
-prompts/
-  00A_每次输入前缀_拆原剧情细纲.md
-  00B_每次输入前缀_改编重排.md
-  00C_每次输入前缀_正文生成.md
-  01_GPTS_拆原剧情细纲.md
-  02_GPTS_改编新世界细纲.md
-  03_GPTS_正文生成.md
-  README_流程说明.md
-```
-
-把 `01/02/03` 三个文件分别复制到对应 GPTS 的系统提示词里。`00A/00B/00C` 是每次输入前缀，当前已经通过 `promptPrefixFile` 分别接入 `config-dagang.json`、`config-adapt.json`、`config-zhengwen.json`，队列发送时会自动带上。
+本仓库不再保留 `prompts/` 目录。每次发送给 GPTS 的统一前缀已经直接写入各阶段 `config-*.json` 的 `promptTemplate`。
