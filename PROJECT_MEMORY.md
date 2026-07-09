@@ -10,10 +10,10 @@
 
 ## 默认工作流
 
-项目分两段：
+项目只保留两段：
 
-1. `dagang`：把 `input` 里的原文章节发送给拆大纲 GPTS，输出到 `output/01_dagang`。
-2. `zhengwen`：把 `output/01_dagang` 里的大纲发送给正文 GPTS，输出到 `output/02_zhengwen`。
+1. `chai`：把 `input` 里的原文章节发送给拆大纲 GPTS，输出到 `output/01_chai`。
+2. `xie`：把 `output/01_chai` 里的拆文结果发送给正文 GPTS，输出到 `output/02_xie`。
 
 常用命令：
 
@@ -52,8 +52,8 @@ input/
 运行时会在 `output` 里生成状态文件，不应提交：
 
 ```text
-output/01_dagang/state.json
-output/02_zhengwen/state.json
+output/01_chai/state.json
+output/02_xie/state.json
 ```
 
 当前状态版本是 `3`，核心字段是 `novelConversations`，用于记录“每本小说对应哪个 GPTS 对话 URL”。
@@ -73,8 +73,8 @@ C:\chrome-automation
 
 - `gpts-queue.mjs`：队列状态机和 ChatGPT 页面自动化。
 - `start-chrome.ps1`：启动或复用带 CDP 的 Chrome。
-- `config-dagang.json`：拆大纲阶段配置。
-- `config-zhengwen.json`：正文阶段配置。
+- `config-chai.json`：拆大纲阶段配置。
+- `config-xie.json`：正文阶段配置。
 - `README.md`：给使用者看的说明书。
 - `PROJECT_MEMORY.md`：给维护者和后续自动化助手看的项目记忆。
 
@@ -93,4 +93,5 @@ C:\chrome-automation
 - 清理运行产物时只清理 `input`/`output` 内容，不要碰脚本和配置。
 - 如果 ChatGPT 页面结构变化，优先检查 `gpts-queue.mjs` 里的输入框、发送按钮、编辑按钮选择器。
 - 保持严格顺序队列，不要实现“失败后跳过继续”的逻辑。
+- 不要重新引入改编大纲、本地拆分或三阶段流程。
 - 不要重新引入“按 prompt 数量换对话”的策略；当前固定策略是“每本小说一个独立对话”。
