@@ -220,6 +220,7 @@ async function loadConfig(configPath, projectRoot) {
   const cfg = { ...DEFAULT_CONFIG, ...raw };
   cfg.configPath = fullPath;
   cfg.configName = path.basename(fullPath, path.extname(fullPath));
+  cfg.stage = cfg.configName.includes('chai') ? 'chai' : cfg.configName.includes('xie') ? 'xie' : cfg.configName;
   cfg.inputDir = resolveFromRoot(projectRoot, cfg.inputDir);
   cfg.outputDir = resolveFromRoot(projectRoot, cfg.outputDir);
   cfg.fileExtensions = (cfg.fileExtensions || ['.txt', '.md']).map((x) =>
@@ -883,10 +884,58 @@ async function waitForReply(page, beforeTexts, cfg) {
   throw new QueueError('Timed out waiting for GPTS reply.', 'timeout');
 }
 
+// 聊天记录格式：YAML frontmatter（元信息）+ 问 + 答，用 Markdown 标记分隔。
+// 下游读取时 extractAnswer() 提取「答」部分，纯文本文件原样返回（向后兼容）。
+const CHAT_ANSWER_MARKER = '## 🤖 答';
+const CHAT_QUESTION_MARKER = '## 👤 问';
+
+// 从聊天记录格式文件内容中提取「答」部分。非聊天记录格式原样返回。
+function extractAnswer(text) {
+  const idx = text.indexOf(CHAT_ANSWER_MARKER);
+  if (idx === -1) return text;
+  return text.slice(idx + CHAT_ANSWER_MARKER.length).trim();
+}
+
+// 组装一轮完整对话记录：frontmatter 元信息 + 问 + 答
+function buildChatRecord(meta, question, answer) {
+  const fm = {
+    book: meta.book || '',
+    chapter: String(meta.chapter || ''),
+    stage: meta.stage || '',
+    conversationUrl: meta.conversationUrl || '',
+    sentAt: meta.sentAt || nowIso(),
+    method: meta.method || 'send',
+    retries: {
+      rateLimit: meta.rateLimitRetries || 0,
+      safety: meta.safetyRetries || 0,
+      normal: meta.normalRetries || 0,
+    },
+    recoveryLog: meta.recoveryLog || [],
+  };
+  const yaml = Object.entries(fm)
+    .map(([k, v]) => {
+      if (v === null || v === undefined) return `${k}: ''`;
+      if (typeof v === 'object') {
+        if (Array.isArray(v)) {
+          if (v.length === 0) return `${k}: []`;
+          const items = v.map((x) => `  - ${JSON.stringify(x)}`).join('\n');
+          return `${k}:\n${items}`;
+        }
+        const sub = Object.entries(v).map(([sk, sv]) => `  ${sk}: ${sv}`).join('\n');
+        return `${k}:\n${sub}`;
+      }
+      return `${k}: ${typeof v === 'string' && (v.includes(':') || v.includes('#')) ? JSON.stringify(v) : v}`;
+    })
+    .join('\n');
+  return `---\n${yaml}\n---\n\n${CHAT_QUESTION_MARKER}\n\n${question}\n\n${CHAT_ANSWER_MARKER}\n\n${answer.trim()}\n`;
+}
+
 async function readTaskContent(cfg, task) {
   const parts = [];
   for (const item of task.inputFiles) {
-    const content = await fs.readFile(item.inputPath, 'utf8');
+    const raw = await fs.readFile(item.inputPath, 'utf8');
+    // 聊天记录格式文件提取「答」部分；纯文本原样返回（向后兼容）
+    const content = extractAnswer(raw);
     if (cfg.includeFileHeaders || task.inputFiles.length > 1) {
       parts.push(`===== ${item.relativePath} =====\n${content}`);
     } else {
@@ -948,6 +997,8 @@ async function processTask(page, cfg, state, task, taskState) {
   const normalMaxAttempts = cfg.maxRetries + 1;
   // 安全前缀会累加：每次安全重试再追加一句声明，让 GPTS 重新评估
   let safetyPrefixCount = 0;
+  // recoveryLog 收集每次恢复动作，最终写入聊天记录的 frontmatter
+  const recoveryLog = [];
 
   for (;;) {
     // 决定本次 method：已发送过且配置了 edit-and-resend 则编辑重发，否则新发
@@ -969,8 +1020,23 @@ async function processTask(page, cfg, state, task, taskState) {
       await saveState(cfg, state);
       await appendLog(cfg, `TASK ${task.id} method=${method} rateRetry=${rateLimitRetries} safetyRetry=${safetyRetries} normalRetry=${normalRetries}`);
 
+      const sentAt = nowIso();
       const reply = await sendOrEdit(page, cfg, task, prompt, method);
-      await atomicWrite(task.outputPath, reply.trim() + '\n');
+
+      // 写入聊天记录格式：frontmatter 元信息 + 问 + 答
+      const record = buildChatRecord({
+        book: task.novelName,
+        chapter: task.localId,
+        stage: cfg.stage,
+        conversationUrl: page.url(),
+        sentAt,
+        method,
+        rateLimitRetries,
+        safetyRetries,
+        normalRetries,
+        recoveryLog,
+      }, prompt, reply);
+      await atomicWrite(task.outputPath, record);
       await fs.rm(`${task.outputPath}.error.txt`, { force: true });
 
       state.currentConversationUrl = page.url();
@@ -1009,6 +1075,7 @@ async function processTask(page, cfg, state, task, taskState) {
         rateLimitRetries++;
         const waitMs = Number(cfg.rateLimitWaitMs || 900000);
         const waitMin = Math.round(waitMs / 60000);
+        recoveryLog.push({ time: nowIso(), kind: 'rate_limit', action: `wait_${waitMin}min`, retry: rateLimitRetries });
         await appendLog(cfg, `TASK ${task.id} rate_limit retry=${rateLimitRetries}/${cfg.rateLimitMaxAttempts} waiting ${waitMin}min`);
         console.log(`  额度限制，等待 ${waitMin} 分钟后重发第 ${rateLimitRetries} 次...`);
         await page.waitForTimeout(waitMs);
@@ -1019,6 +1086,7 @@ async function processTask(page, cfg, state, task, taskState) {
       if (kind === 'safety' && safetyRetries < Number(cfg.safetyMaxAttempts || 5)) {
         safetyRetries++;
         safetyPrefixCount++;
+        recoveryLog.push({ time: nowIso(), kind: 'safety', action: `add_safety_prefix x${safetyPrefixCount}`, retry: safetyRetries });
         await appendLog(cfg, `TASK ${task.id} safety retry=${safetyRetries}/${cfg.safetyMaxAttempts} prefixCount=${safetyPrefixCount}`);
         console.log(`  安全拦截，加安全声明前缀后重发第 ${safetyRetries} 次...`);
         continue;
@@ -1026,6 +1094,7 @@ async function processTask(page, cfg, state, task, taskState) {
 
       // 3) 其他错误：走原有 maxRetries 逻辑
       normalRetries++;
+      recoveryLog.push({ time: nowIso(), kind, action: 'normal_retry', retry: normalRetries });
       if (normalRetries >= normalMaxAttempts) {
         await atomicWrite(`${task.outputPath}.error.txt`, `${lastError}\n`);
         throw new Error(lastError);
