@@ -230,7 +230,10 @@ async function launch(command, stage, options) {
     if (stageStatus.complete) throw new Error(`${stage} is already complete.`);
   }
 
-  const logPath = path.join(projectRoot, 'output', `control-${stage}.log`);
+  // 控制器日志跟随该阶段 stateFile 所在目录（书籍/.state/<stage>），避免散落在各书目录中。
+  const stageCfg = await readJson(path.join(projectRoot, STAGES[stage]));
+  const stateAbsPath = resolveFromRoot(stageCfg.stateFile || path.join(stageCfg.outputDir, 'state.json'));
+  const logPath = path.join(path.dirname(stateAbsPath), `control-${stage}.log`);
   await fs.mkdir(path.dirname(logPath), { recursive: true });
   await fs.appendFile(
     logPath,

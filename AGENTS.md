@@ -1,6 +1,8 @@
 # XXSBooks agent rules
 
-This repository is a two-stage GPTS queue: `input -> output/01_chai -> output/02_xie`. `chai` must finish before `xie` starts.
+This repository is a two-stage GPTS queue organized by book. Each book lives under `书籍/书名/` and contains three subdirs: `原文/` (chai input) -> `拆分/` (chai output / xie input) -> `正文/` (xie output). `chai` must finish before `xie` starts. State and logs live in `书籍/.state/`, never inside book folders.
+
+Every book keeps its own ChatGPT conversation URL per stage (recorded in `state.novelConversations[书名]`); chapters of the same book reuse one conversation, different books never cross addresses.
 
 ## Control contract
 

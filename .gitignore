@@ -1,18 +1,18 @@
 node_modules/
 
-input/*
-!input/.gitkeep
+# 按书组织：保留 书籍/ 目录本身，但忽略每本书的内容与运行状态
+书籍/*
+!书籍/.gitkeep
 
-output/*
-!output/.gitkeep
+# 状态/日志/锁一律不入库
+**/state.json
+**/run.log
+*.log
 *.error.txt
 
 .env
 .env.*
 
-**/state.json
-**/run.log
-*.log
 *.tmp
 *.bak
 

@@ -2,18 +2,26 @@
 
 这是一个本地批量队列工具，用 Chrome 自动化把小说章节发送给 ChatGPT GPTS，并把回复保存到本地文件。
 
-当前项目只保留两阶段流程：
+当前项目按「书」组织，每本书自包含三个子目录，两阶段流程在书内部流转：
 
-1. `chai`：把 `input` 里的原文章节发送给拆大纲 GPTS，输出到 `output/01_chai`。
-2. `xie`：把 `output/01_chai` 里的拆文结果发送给正文 GPTS，输出到 `output/02_xie`。
+1. `chai`：把某本书 `原文/` 里的章节发送给拆大纲 GPTS，输出到同一本书的 `拆分/`。
+2. `xie`：把某本书 `拆分/` 里的拆文结果发送给正文 GPTS，输出到同一本书的 `正文/`。
 
-文件流：
+文件流（每本书独立）：
 
 ```text
-input
-  -> output/01_chai
-  -> output/02_xie
+书籍/书名/原文   ->  书籍/书名/拆分   ->  书籍/书名/正文
 ```
+
+## 对话地址隔离（重要）
+
+GPTS 是 ChatGPT 的定制助手（地址形如 `chatgpt.com/g/g-xxxx`）。每打开一次会生成一个独立对话，有自己的准确地址（形如 `chatgpt.com/c/xxxx`）。
+
+- 同一本书的多章节必须发到**同一个对话地址**，保持上下文连续。
+- 不同书之间**绝对不能跨地址**串话。
+- 每本书在 `chai` 阶段有一个对话地址、在 `xie` 阶段有另一个对话地址，各自独立记录在该阶段的状态文件里，互不干扰。
+
+这套隔离由 `state.novelConversations[书名]` 实现，队列会自动记住每本书对应的对话地址并复用，无需手动管理。
 
 ## 安装
 
@@ -38,22 +46,39 @@ Profile: C:\chrome-automation
 
 第一次使用时，在打开的 Chrome 里登录 ChatGPT。之后不要删除 `C:\chrome-automation`，登录状态会复用。
 
-## 输入目录
+## 书目录结构
 
-推荐格式：
+每本书在 `书籍/` 下一个独立目录，内含三个子目录：
 
 ```text
-input/
-  小世界A/
-    001.txt
-    002.txt
-    003.txt
-  小世界B/
-    001.txt
-    002.txt
+书籍/
+  书名A/
+    原文/          <- chai 阶段读取
+      001.txt
+      002.txt
+      003.txt
+    拆分/          <- chai 输出 / xie 读取
+      001.md
+      002.md
+      003.md
+    正文/          <- xie 输出
+      001.md
+      002.md
+      003.md
+  书名B/
+    原文/
+    拆分/
+    正文/
 ```
 
-每个顶层文件夹会被当作一个独立小世界/小说对话处理。文件名建议用补零编号，保证章节顺序稳定。
+每个 `书籍/` 下的顶层目录就是一本书，书名即目录名。文件名建议用补零编号，保证章节顺序稳定。状态文件与日志集中放在 `书籍/.state/`，不污染各书目录：
+
+```text
+书籍/.state/
+  chai/state.json, run.log, control-chai.log
+  xie/state.json, run.log, control-xie.log
+  .gpts-queue.lock.json
+```
 
 ## Codex 控制（推荐）
 
@@ -109,14 +134,12 @@ npm run pipeline
 
 - `config-chai.json`
   - GPTS：`https://chatgpt.com/g/g-6a008fa0c5208191baf690ede768a20c-chai-da-gang`
-  - 读取 `input`
-  - 输出到 `output/01_chai`
+  - 读取每本书的 `原文/`，输出到同书的 `拆分/`
   - `promptTemplate`：`【严格按照提示词执行，注意上下文】` + 当前内容
 
 - `config-xie.json`
   - GPTS：`https://chatgpt.com/g/g-69fcd66363e08191b7089e3f1d124aab-zheng-wen`
-  - 读取 `output/01_chai`
-  - 输出到 `output/02_xie`
+  - 读取每本书的 `拆分/`，输出到同书的 `正文/`
   - `promptTemplate`：`【严格按照提示词执行，注意上下文】` + 当前内容
 
 ## 失败恢复

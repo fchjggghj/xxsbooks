@@ -31,7 +31,8 @@ async function withReclaimGuard(lockPath, action) {
 }
 
 export function lockPathFor(projectRoot) {
-  return path.join(path.resolve(projectRoot), 'output', '.gpts-queue.lock.json');
+  // 锁文件与状态/日志统一放在 书籍/.state 下，不污染各书目录。
+  return path.join(path.resolve(projectRoot), '书籍', '.state', '.gpts-queue.lock.json');
 }
 
 export function isProcessAlive(pid) {

@@ -33,6 +33,10 @@ const DEFAULT_CONFIG = {
   gptUrl: 'https://chatgpt.com/g/your-gpts-id',
   inputDir: 'input',
   outputDir: 'output',
+  // 书结构模式：每本书在 inputDir 下一个目录，源文件位于该书目录的 inputSubdir 子目录，
+  // 输出写入该书目录的 outputSubdir 子目录。两个值都为空时退化为旧的扁平递归扫描。
+  inputSubdir: '',
+  outputSubdir: '',
   fileExtensions: ['.txt', '.md'],
   recursive: true,
   skipExisting: true,
@@ -259,15 +263,29 @@ function taskIdFor(index, group) {
 }
 
 function outputPathForTask(cfg, task) {
+  // 书结构模式：outputDir/书名/outputSubdir/[中间子路径/]文件名.ext
+  // 扁平模式（outputSubdir 为空或无书目录）：退化为 outputDir/相对目录/文件名.ext
+  const useSubdir = task.hasNovelFolder && cfg.outputSubdir;
+
   if (task.inputFiles.length === 1) {
-    const parsed = path.parse(task.inputFiles[0].relativePath);
-    return path.join(cfg.outputDir, parsed.dir, `${parsed.name}${cfg.outputExtension}`);
+    const rel = task.inputFiles[0].relativePath;
+    const parts = rel.split(/[\\/]+/).filter(Boolean);
+    const fileName = parts.pop();
+    const midParts = parts.slice(1); // 去掉首段 novelKey，保留可能的卷/子目录
+    const outParts = [cfg.outputDir, task.novelKey];
+    if (useSubdir) outParts.push(cfg.outputSubdir);
+    outParts.push(...midParts);
+    const parsed = path.parse(fileName);
+    outParts.push(`${parsed.name}${cfg.outputExtension}`);
+    return path.join(...outParts);
   }
 
   const first = sanitizeFileName(path.parse(task.inputFiles[0].relativePath).name);
   const last = sanitizeFileName(path.parse(task.inputFiles.at(-1).relativePath).name);
-  const novelDir = task.hasNovelFolder ? task.novelName : '';
-  return path.join(cfg.outputDir, novelDir, `${task.localId}__${first}__to__${last}${cfg.outputExtension}`);
+  const outParts = [cfg.outputDir, task.hasNovelFolder ? task.novelKey : ''];
+  if (useSubdir) outParts.push(cfg.outputSubdir);
+  outParts.push(`${task.localId}__${first}__to__${last}${cfg.outputExtension}`);
+  return path.join(...outParts);
 }
 
 function fileNovelInfo(file) {
@@ -288,11 +306,51 @@ function fileNovelInfo(file) {
   };
 }
 
+async function scanBookSource(cfg) {
+  // 收集每本书的源文件，并附带 novelKey/novelName/hasNovelFolder。
+  // 书结构模式（inputSubdir 非空）：inputDir 下每个顶层目录是一本书，
+  //   源文件在该书目录的 inputSubdir 子目录下，relativePath 记为 "书名/文件相对路径"，
+  //   保证 novelKey 始终是书名，与对话地址隔离逻辑对齐。
+  // 扁平模式（inputSubdir 为空）：递归扫描 inputDir，由 relativePath 推断 novelKey。
+  const files = [];
+
+  if (cfg.inputSubdir) {
+    if (!fssync.existsSync(cfg.inputDir)) return files;
+    const entries = await fs.readdir(cfg.inputDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const bookName = entry.name;
+      const sourceDir = path.join(cfg.inputDir, bookName, cfg.inputSubdir);
+      if (!fssync.existsSync(sourceDir)) continue;
+      const subFiles = await walkFiles(sourceDir, cfg.recursive, cfg.fileExtensions, sourceDir);
+      for (const f of subFiles) {
+        files.push({
+          inputPath: f.inputPath,
+          relativePath: path.join(bookName, f.relativePath),
+          novelKey: bookName,
+          novelName: bookName,
+          hasNovelFolder: true,
+        });
+      }
+    }
+    files.sort((a, b) =>
+      a.relativePath.localeCompare(b.relativePath, 'zh-Hans-CN', { numeric: true }),
+    );
+    return files;
+  }
+
+  const walked = await walkFiles(cfg.inputDir, cfg.recursive, cfg.fileExtensions);
+  for (const f of walked) {
+    files.push({ ...f, ...fileNovelInfo(f) });
+  }
+  return files;
+}
+
 async function buildTasks(cfg, opts) {
   await ensureDir(cfg.inputDir);
   await ensureDir(cfg.outputDir);
 
-  const files = await walkFiles(cfg.inputDir, cfg.recursive, cfg.fileExtensions);
+  const files = await scanBookSource(cfg);
   const novels = new Map();
   for (const file of files) {
     const novel = fileNovelInfo(file);
