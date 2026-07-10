@@ -5,6 +5,7 @@
   "outputDir": "书籍",
   "inputSubdir": "原文",
   "outputSubdir": "拆分",
+  "volumeMode": true,
   "fileExtensions": [".txt", ".md"],
   "recursive": true,
   "skipExisting": true,

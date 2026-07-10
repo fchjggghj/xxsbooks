@@ -27,11 +27,11 @@ Usage:
   node control.mjs stop [--json]
   node control.mjs reconcile <chai|xie|all> [--apply] [--json]
   node control.mjs preflight [--json]
-  node control.mjs normalize <书名> [--json]
+  node control.mjs normalize <书名> [卷名] [--json]
 
 status and reconcile without --apply are read-only. start/resume run in the background.
 preflight: 跑前预检（Chrome/CDP/登录态/输入文件齐全/编号连续）。
-normalize: 把指定书的原文文件自动补零重命名。`;
+normalize: 把指定书（卷模式下含卷名）的原文文件自动补零重命名。`;
 }
 
 function parseArgs(argv) {
@@ -501,34 +501,41 @@ function progressBar(done, total, width = 10) {
   return `[${'█'.repeat(filled)}${'░'.repeat(width - filled)}] ${done}/${total} ${pct}%`;
 }
 
-// 为每本书目录生成 进度.md，资源管理器里打开书目录就能看到进度
+// 为每本书/卷目录生成 进度.md，资源管理器里打开就能看到进度
 async function writeBookProgressFiles(statusResult) {
   const chaiStage = statusResult.stages.chai;
   const xieStage = statusResult.stages.xie;
   if (!chaiStage && !xieStage) return;
 
-  // 从 state.tasks 收集每本书的进度
-  const bookProgress = new Map();
+  // 从 state.tasks 收集每个卷的进度
+  const progress = new Map();
   for (const stageInfo of [chaiStage, xieStage].filter(Boolean)) {
     const loaded = await loadStage(stageInfo.stage);
     if (!loaded.state?.tasks) continue;
     for (const task of Object.values(loaded.state.tasks)) {
-      const key = task.novelKey;
-      if (!bookProgress.has(key)) {
-        bookProgress.set(key, { book: task.novelName || key, chai: { done: 0, total: 0 }, xie: { done: 0, total: 0 } });
+      const key = task.novelKey; // 卷模式下是 "书名/卷名"
+      if (!progress.has(key)) {
+        progress.set(key, {
+          book: task.novelName || key,
+          volume: task.volumeName || '',
+          chai: { done: 0, total: 0 },
+          xie: { done: 0, total: 0 },
+        });
       }
-      const bp = bookProgress.get(key);
+      const bp = progress.get(key);
       bp[stageInfo.stage].total++;
       if (task.status === 'done') bp[stageInfo.stage].done++;
     }
   }
 
   const booksDir = resolveFromRoot('书籍');
-  for (const [key, bp] of bookProgress) {
-    const bookDir = path.join(booksDir, key);
-    if (!fssync.existsSync(bookDir)) continue;
+  for (const [key, bp] of progress) {
+    // 卷模式下 key = "书名/卷名"，进度文件写到卷目录下
+    const targetDir = path.join(booksDir, ...key.split(/[\\/]+/));
+    if (!fssync.existsSync(targetDir)) continue;
+    const title = bp.volume ? `${bp.book} - ${bp.volume}` : bp.book;
     const lines = [
-      `# ${bp.book} 进度`,
+      `# ${title} 进度`,
       '',
       `更新时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`,
       '',
@@ -539,8 +546,33 @@ async function writeBookProgressFiles(statusResult) {
       `${progressBar(bp.xie.done, bp.xie.total)}  ${bp.xie.done}/${bp.xie.total} 章`,
       '',
     ];
-    await atomicWriteText(path.join(bookDir, '进度.md'), lines.join('\n'));
+    await atomicWriteText(path.join(targetDir, '进度.md'), lines.join('\n'));
   }
+}
+
+// 检查单个源目录的输入文件齐全性和编号连续性
+async function checkInputFiles(sourceDir, label) {
+  if (!fssync.existsSync(sourceDir)) {
+    return { name: `${label} 输入目录`, ok: false, detail: `目录不存在: ${path.relative(projectRoot, sourceDir)}` };
+  }
+  const files = (await fs.readdir(sourceDir, { withFileTypes: true }))
+    .filter((e) => e.isFile() && ['.txt', '.md'].includes(path.extname(e.name).toLowerCase()))
+    .map((e) => e.name)
+    .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN', { numeric: true }));
+  if (files.length === 0) {
+    return { name: `${label} 输入文件`, ok: false, detail: '没有 .txt/.md 文件' };
+  }
+  const issues = [];
+  const nums = files.map((f) => parseInt(path.parse(f).name.replace(/\D/g, ''), 10)).filter((n) => !isNaN(n));
+  if (nums.length === files.length) {
+    const max = Math.max(...nums);
+    for (let i = 1; i <= max; i++) {
+      if (!nums.includes(i)) issues.push(`缺第${i}章`);
+    }
+  } else if (nums.length > 0) {
+    issues.push('部分文件名无法解析为编号');
+  }
+  return { name: `${label} 输入文件`, ok: issues.length === 0, detail: `${files.length} 个文件${issues.length ? '，问题: ' + issues.join(', ') : '，编号连续'}` };
 }
 
 // 跑前预检：Chrome/CDP/登录态/输入文件齐全/编号连续
@@ -575,38 +607,35 @@ async function preflight() {
     checks.push({ name: `${stageName} GPTS 地址`, ok: valid, detail: valid ? cfg.gptUrl : `无效: ${cfg.gptUrl}` });
   }
 
-  // 4. 每本书输入文件齐全 + 编号连续
+  // 4. 每本书/卷输入文件齐全 + 编号连续
   const booksDir = resolveFromRoot(chaiCfg.inputDir || '书籍');
   const inputSubdir = chaiCfg.inputSubdir || '';
+  const volumeMode = chaiCfg.volumeMode || false;
   if (fssync.existsSync(booksDir)) {
     const entries = await fs.readdir(booksDir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-      const sourceDir = inputSubdir ? path.join(booksDir, entry.name, inputSubdir) : path.join(booksDir, entry.name);
-      if (!fssync.existsSync(sourceDir)) {
-        checks.push({ name: `${entry.name} 输入目录`, ok: false, detail: `目录不存在: ${path.relative(projectRoot, sourceDir)}` });
-        continue;
-      }
-      const files = (await fs.readdir(sourceDir, { withFileTypes: true }))
-        .filter((e) => e.isFile() && ['.txt', '.md'].includes(path.extname(e.name).toLowerCase()))
-        .map((e) => e.name)
-        .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN', { numeric: true }));
-      if (files.length === 0) {
-        checks.push({ name: `${entry.name} 输入文件`, ok: false, detail: '没有 .txt/.md 文件' });
-        continue;
-      }
-      // 检查编号连续性
-      const issues = [];
-      const nums = files.map((f) => parseInt(path.parse(f).name.replace(/\D/g, ''), 10)).filter((n) => !isNaN(n));
-      if (nums.length === files.length) {
-        const max = Math.max(...nums);
-        for (let i = 1; i <= max; i++) {
-          if (!nums.includes(i)) issues.push(`缺第${i}章`);
+      if (volumeMode) {
+        // 卷模式：扫描 书名/卷名/原文/
+        const bookDir = path.join(booksDir, entry.name);
+        const volumes = (await fs.readdir(bookDir, { withFileTypes: true }))
+          .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+          .map((e) => e.name)
+          .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN', { numeric: true }));
+        if (volumes.length === 0) {
+          checks.push({ name: `${entry.name} 卷目录`, ok: false, detail: '没有卷目录（需创建如 第一卷/）' });
+          continue;
         }
-      } else if (nums.length > 0) {
-        issues.push('部分文件名无法解析为编号');
+        for (const volName of volumes) {
+          const sourceDir = path.join(bookDir, volName, inputSubdir);
+          const result = checkInputFiles(sourceDir, `${entry.name}/${volName}`);
+          checks.push(result);
+        }
+      } else {
+        const sourceDir = inputSubdir ? path.join(booksDir, entry.name, inputSubdir) : path.join(booksDir, entry.name);
+        const result = checkInputFiles(sourceDir, entry.name);
+        checks.push(result);
       }
-      checks.push({ name: `${entry.name} 输入文件`, ok: issues.length === 0, detail: `${files.length} 个文件${issues.length ? '，问题: ' + issues.join(', ') : '，编号连续'}` });
     }
   }
 
@@ -646,13 +675,30 @@ function extractFileOrder(name) {
 }
 
 // 章节编号自动补零：把任意文件名重命名为 0001.txt / 0002.txt ...
-async function normalizeBook(bookName) {
-  if (!bookName) throw new Error('请指定书名，例如: node control.mjs normalize 测试书');
+// 卷模式下：normalize 书名 卷名
+// 非卷模式：normalize 书名
+async function normalizeBook(bookName, volumeName) {
+  if (!bookName) throw new Error('请指定书名，例如: node control.mjs normalize 测试书 第一卷');
   const chaiCfg = await readJson(path.join(projectRoot, STAGES.chai));
   const booksDir = resolveFromRoot(chaiCfg.inputDir || '书籍');
   const inputSubdir = chaiCfg.inputSubdir || '';
+  const volumeMode = chaiCfg.volumeMode || false;
   const bookDir = path.join(booksDir, bookName);
-  const sourceDir = inputSubdir ? path.join(bookDir, inputSubdir) : bookDir;
+
+  if (volumeMode && !volumeName) {
+    // 卷模式下未指定卷名，列出所有卷供用户选择
+    if (!fssync.existsSync(bookDir)) throw new Error(`书目录不存在: ${bookName}`);
+    const volumes = (await fs.readdir(bookDir, { withFileTypes: true }))
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+      .map((e) => e.name)
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN', { numeric: true }));
+    if (volumes.length === 0) throw new Error(`${bookName} 下没有卷目录，请先创建卷目录（如 第一卷/）`);
+    throw new Error(`卷模式请在书名后指定卷名，例如: node control.mjs normalize ${bookName} ${volumes[0]}\n可用卷: ${volumes.join(', ')}`);
+  }
+
+  const sourceDir = volumeMode
+    ? path.join(bookDir, volumeName || '', inputSubdir)
+    : (inputSubdir ? path.join(bookDir, inputSubdir) : bookDir);
 
   if (!fssync.existsSync(sourceDir)) throw new Error(`源目录不存在: ${path.relative(projectRoot, sourceDir)}`);
 
@@ -683,7 +729,7 @@ async function normalizeBook(bookName) {
     renamed.push({ from: oldName, to: newName });
   }
 
-  return { ok: true, command: 'normalize', book: bookName, dir: path.relative(projectRoot, sourceDir), renamed: renamed.length, skipped: skipped.length, details: renamed };
+  return { ok: true, command: 'normalize', book: bookName, volume: volumeName || '', dir: path.relative(projectRoot, sourceDir), renamed: renamed.length, skipped: skipped.length, details: renamed };
 }
 
 async function main() {
@@ -712,7 +758,7 @@ async function main() {
   } else if (command === 'preflight') {
     result = await preflight();
   } else if (command === 'normalize') {
-    result = await normalizeBook(positional[1]);
+    result = await normalizeBook(positional[1], positional[2]);
   } else {
     throw new Error(`Unknown command: ${command}\n\n${usage()}`);
   }

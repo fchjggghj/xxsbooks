@@ -37,6 +37,11 @@ const DEFAULT_CONFIG = {
   // 输出写入该书目录的 outputSubdir 子目录。两个值都为空时退化为旧的扁平递归扫描。
   inputSubdir: '',
   outputSubdir: '',
+  // 卷模式：强制每本书分卷，inputDir/书名/卷名/inputSubdir/文件
+  // novelKey = "书名/卷名"，对话按卷隔离，同卷复用对话，跨卷不串
+  volumeMode: false,
+  // 前卷摘要注入：xie 处理某卷时，读取同书前序卷的拆分文件作为背景注入到 prompt 前
+  priorVolumeContext: false,
   fileExtensions: ['.txt', '.md'],
   recursive: true,
   skipExisting: true,
@@ -348,6 +353,7 @@ function taskIdFor(index, group) {
 }
 
 function outputPathForTask(cfg, task) {
+  // 卷模式：outputDir/书名/卷名/outputSubdir/[中间子路径/]文件名.ext
   // 书结构模式：outputDir/书名/outputSubdir/[中间子路径/]文件名.ext
   // 扁平模式（outputSubdir 为空或无书目录）：退化为 outputDir/相对目录/文件名.ext
   const useSubdir = task.hasNovelFolder && cfg.outputSubdir;
@@ -356,8 +362,10 @@ function outputPathForTask(cfg, task) {
     const rel = task.inputFiles[0].relativePath;
     const parts = rel.split(/[\\/]+/).filter(Boolean);
     const fileName = parts.pop();
-    const midParts = parts.slice(1); // 去掉首段 novelKey，保留可能的卷/子目录
-    const outParts = [cfg.outputDir, task.novelKey];
+    // relativePath = 书名/[卷名/]文件路径。去掉 novelKey 首段，保留中间子路径。
+    const novelKeyParts = task.novelKey.split(/[\\/]+/).filter(Boolean);
+    const midParts = parts.slice(novelKeyParts.length);
+    const outParts = [cfg.outputDir, ...novelKeyParts];
     if (useSubdir) outParts.push(cfg.outputSubdir);
     outParts.push(...midParts);
     const parsed = path.parse(fileName);
@@ -367,7 +375,8 @@ function outputPathForTask(cfg, task) {
 
   const first = sanitizeFileName(path.parse(task.inputFiles[0].relativePath).name);
   const last = sanitizeFileName(path.parse(task.inputFiles.at(-1).relativePath).name);
-  const outParts = [cfg.outputDir, task.hasNovelFolder ? task.novelKey : ''];
+  const novelKeyParts = task.novelKey.split(/[\\/]+/).filter(Boolean);
+  const outParts = [cfg.outputDir, ...novelKeyParts];
   if (useSubdir) outParts.push(cfg.outputSubdir);
   outParts.push(`${task.localId}__${first}__to__${last}${cfg.outputExtension}`);
   return path.join(...outParts);
@@ -391,13 +400,94 @@ function fileNovelInfo(file) {
   };
 }
 
+// 中文数字转阿拉伯，用于卷名正确排序（第一卷 < 第二卷 < ... < 第十一卷）
+const CN_NUM_MAP = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+function chineseToArabic(str) {
+  const m = str.match(/[一二两三四五六七八九十百千]+/);
+  if (!m) return null;
+  const s = m[0];
+  if (s === '十') return 10;
+  if (s.startsWith('十')) return 10 + (CN_NUM_MAP[s[1]] || 0);
+  if (s.endsWith('十') && s.length === 2) return CN_NUM_MAP[s[0]] * 10;
+  if (s.includes('十') && s.length === 3) return (CN_NUM_MAP[s[0]] || 0) * 10 + (CN_NUM_MAP[s[2]] || 0);
+  if (s.length === 1) return CN_NUM_MAP[s] || null;
+  return null;
+}
+// 卷名排序：提取中文/阿拉伯数字排序，无数字时按 localeCompare
+function volumeSortKey(name) {
+  const arabic = name.match(/\d+/);
+  if (arabic) return Number(arabic[0]);
+  const cn = chineseToArabic(name);
+  return cn !== null ? cn : 0;
+}
+function sortVolumeNames(a, b) {
+  const ka = volumeSortKey(a);
+  const kb = volumeSortKey(b);
+  if (ka !== kb) return ka - kb;
+  return a.localeCompare(b, 'zh-Hans-CN', { numeric: true });
+}
+
 async function scanBookSource(cfg) {
-  // 收集每本书的源文件，并附带 novelKey/novelName/hasNovelFolder。
-  // 书结构模式（inputSubdir 非空）：inputDir 下每个顶层目录是一本书，
-  //   源文件在该书目录的 inputSubdir 子目录下，relativePath 记为 "书名/文件相对路径"，
-  //   保证 novelKey 始终是书名，与对话地址隔离逻辑对齐。
+  // 收集每本书的源文件，并附带 novelKey/novelName/hasNovelFolder/volumeKey/volumeName。
+  //
+  // 卷模式（volumeMode=true，强制分卷）：
+  //   inputDir/书名/卷名/inputSubdir/文件
+  //   novelKey = "书名/卷名"，对话按卷隔离，同卷复用对话，跨卷不串
+  //   relativePath = "书名/卷名/文件相对路径"
+  //
+  // 书结构模式（inputSubdir 非空，volumeMode=false）：
+  //   inputDir/书名/inputSubdir/文件
+  //   novelKey = 书名
+  //
   // 扁平模式（inputSubdir 为空）：递归扫描 inputDir，由 relativePath 推断 novelKey。
   const files = [];
+
+  if (cfg.volumeMode && cfg.inputSubdir) {
+    if (!fssync.existsSync(cfg.inputDir)) return files;
+    const books = await fs.readdir(cfg.inputDir, { withFileTypes: true });
+    for (const bookEntry of books) {
+      if (!bookEntry.isDirectory() || bookEntry.name.startsWith('.')) continue;
+      const bookName = bookEntry.name;
+      const bookDir = path.join(cfg.inputDir, bookName);
+      const volumes = await fs.readdir(bookDir, { withFileTypes: true });
+      const volumeNames = volumes
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+        .map((e) => e.name)
+        .sort(sortVolumeNames);
+      for (const volumeName of volumeNames) {
+        const sourceDir = path.join(bookDir, volumeName, cfg.inputSubdir);
+        if (!fssync.existsSync(sourceDir)) continue;
+        const subFiles = await walkFiles(sourceDir, cfg.recursive, cfg.fileExtensions, sourceDir);
+        const novelKey = `${bookName}/${volumeName}`;
+        for (const f of subFiles) {
+          files.push({
+            inputPath: f.inputPath,
+            relativePath: path.join(bookName, volumeName, f.relativePath),
+            novelKey,
+            novelName: bookName,
+            volumeKey: novelKey,
+            volumeName,
+            hasNovelFolder: true,
+          });
+        }
+      }
+    }
+    // 卷模式下按 novelKey(书名/卷名) 分组排序，保证卷顺序正确（第一卷 < 第二卷）
+    files.sort((a, b) => {
+      const aParts = a.novelKey.split('/');
+      const bParts = b.novelKey.split('/');
+      // 先按书名排序
+      const bookCmp = aParts[0].localeCompare(bParts[0], 'zh-Hans-CN', { numeric: true });
+      if (bookCmp !== 0) return bookCmp;
+      // 同书按卷名排序（支持中文数字）
+      if (aParts[1] && bParts[1]) {
+        const vcmp = sortVolumeNames(aParts[1], bParts[1]);
+        if (vcmp !== 0) return vcmp;
+      }
+      return a.relativePath.localeCompare(b.relativePath, 'zh-Hans-CN', { numeric: true });
+    });
+    return files;
+  }
 
   if (cfg.inputSubdir) {
     if (!fssync.existsSync(cfg.inputDir)) return files;
@@ -414,6 +504,8 @@ async function scanBookSource(cfg) {
           relativePath: path.join(bookName, f.relativePath),
           novelKey: bookName,
           novelName: bookName,
+          volumeKey: bookName,
+          volumeName: '',
           hasNovelFolder: true,
         });
       }
@@ -426,7 +518,7 @@ async function scanBookSource(cfg) {
 
   const walked = await walkFiles(cfg.inputDir, cfg.recursive, cfg.fileExtensions);
   for (const f of walked) {
-    files.push({ ...f, ...fileNovelInfo(f) });
+    files.push({ ...f, ...fileNovelInfo(f), volumeKey: f.novelKey, volumeName: '' });
   }
   return files;
 }
@@ -438,7 +530,10 @@ async function buildTasks(cfg, opts) {
   const files = await scanBookSource(cfg);
   const novels = new Map();
   for (const file of files) {
-    const novel = fileNovelInfo(file);
+    // scanBookSource 已附带 novelKey/volumeKey，直接用；否则用 fileNovelInfo 推断
+    const novel = file.novelKey
+      ? { novelKey: file.novelKey, novelName: file.novelName || file.novelKey, volumeKey: file.volumeKey || file.novelKey, volumeName: file.volumeName || '', hasNovelFolder: file.hasNovelFolder !== false }
+      : fileNovelInfo(file);
     if (!novels.has(novel.novelKey)) novels.set(novel.novelKey, { ...novel, files: [] });
     novels.get(novel.novelKey).files.push(file);
   }
@@ -454,6 +549,8 @@ async function buildTasks(cfg, opts) {
         index: tasks.length,
         novelKey: novel.novelKey,
         novelName: novel.novelName,
+        volumeKey: novel.volumeKey || novel.novelKey,
+        volumeName: novel.volumeName || '',
         hasNovelFolder: novel.hasNovelFolder,
         inputFiles: group,
         outputPath: '',
@@ -945,13 +1042,54 @@ async function readTaskContent(cfg, task) {
   return parts.join('\n\n');
 }
 
-function renderPrompt(template, task, content) {
+// 收集同书前序卷的拆分文件作为背景信息，注入到 xie 的 prompt 前。
+// novelKey = "书名/卷名"，提取书名，找到该书目录下排在当前卷之前的卷，
+// 读取它们的 outputSubdir（拆分）目录下所有文件，拼接成背景文本。
+async function collectPriorVolumes(cfg, task) {
+  if (!cfg.priorVolumeContext) return '';
+  if (!task.volumeKey || !task.volumeKey.includes('/')) return '';
+
+  const [bookName, currentVolume] = task.volumeKey.split('/');
+  const bookDir = path.join(cfg.inputDir, bookName);
+  if (!fssync.existsSync(bookDir)) return '';
+
+  const entries = await fs.readdir(bookDir, { withFileTypes: true });
+  const volumeDirs = entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+    .map((e) => e.name)
+    .sort(sortVolumeNames);
+
+  const currentIdx = volumeDirs.indexOf(currentVolume);
+  if (currentIdx <= 0) return ''; // 第一卷或找不到，无前卷
+
+  // chai 的输出目录是「拆分」，xie 读取前序卷的拆分作为背景
+  const priorSubdir = cfg.inputSubdir === '拆分' ? '拆分' : (cfg.priorVolumeSourceSubdir || '拆分');
+  const parts = [];
+  for (let i = 0; i < currentIdx; i++) {
+    const volName = volumeDirs[i];
+    const priorDir = path.join(bookDir, volName, priorSubdir);
+    if (!fssync.existsSync(priorDir)) continue;
+    const files = await walkFiles(priorDir, cfg.recursive, cfg.fileExtensions, priorDir);
+    for (const f of files) {
+      const raw = await fs.readFile(f.inputPath, 'utf8');
+      const content = extractAnswer(raw);
+      parts.push(`===== ${volName}/${f.relativePath} =====\n${content}`);
+    }
+  }
+
+  if (parts.length === 0) return '';
+  return `【前序卷背景摘要】\n以下是前序卷的拆分提纲，作为当前卷创作的背景参考，请保持人物、伏笔、设定的连续性：\n\n${parts.join('\n\n')}\n\n`;
+}
+
+function renderPrompt(template, task, content, priorVolumes = '') {
   return String(template)
     .replaceAll('{{content}}', content)
+    .replaceAll('{{priorVolumes}}', priorVolumes)
     .replaceAll('{{taskId}}', task.id)
     .replaceAll('{{localTaskId}}', task.localId)
     .replaceAll('{{novelName}}', task.novelName)
     .replaceAll('{{novelKey}}', task.novelKey)
+    .replaceAll('{{volumeName}}', task.volumeName || '')
     .replaceAll('{{chapterCount}}', String(task.inputFiles.length))
     .replaceAll('{{filename}}', path.basename(task.inputFiles[0].inputPath))
     .replaceAll('{{relativePath}}', task.inputFiles[0].relativePath)
@@ -976,7 +1114,9 @@ async function sendOrEdit(page, cfg, task, prompt, method) {
 
 async function processTask(page, cfg, state, task, taskState) {
   const content = await readTaskContent(cfg, task);
-  const basePrompt = renderPrompt(cfg.promptTemplate, task, content);
+  // 前卷摘要注入：xie 处理某卷时，读取同书前序卷的拆分作为背景
+  const priorVolumes = await collectPriorVolumes(cfg, task);
+  const basePrompt = renderPrompt(cfg.promptTemplate, task, content, priorVolumes);
   const useEditFirst =
     cfg.retryMode === 'edit-and-resend' &&
     taskState.status === 'failed' &&
