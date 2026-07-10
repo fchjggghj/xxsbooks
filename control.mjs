@@ -324,6 +324,28 @@ function reconcileChanges(loaded) {
       changes.push({ id: currentId, field: 'currentTaskId', from: currentId, to: null, reason: 'stale_current' });
     }
   }
+
+  // novelConversations retains the ChatGPT URL last used for each novel. When a
+  // novel has zero done tasks (all pending/failed), that URL led to no successful
+  // output — reusing it risks re-opening a broken/failed conversation and stalling
+  // the next run. Drop it so ensureNovelConversation opens a fresh conversation.
+  const conversations = loaded.state?.novelConversations || {};
+  const tasksByNovel = new Map();
+  for (const task of Object.values(loaded.state?.tasks || {})) {
+    if (!tasksByNovel.has(task.novelKey)) tasksByNovel.set(task.novelKey, []);
+    tasksByNovel.get(task.novelKey).push(task);
+  }
+  for (const [novelKey, url] of Object.entries(conversations)) {
+    if (!url) continue;
+    const novelTasks = tasksByNovel.get(novelKey) || [];
+    const hasDone = novelTasks.some((t) => {
+      const flagged = changes.find((c) => c.id === t.id && c.reason === 'output_missing');
+      return t.status === 'done' && !flagged;
+    });
+    if (!hasDone) {
+      changes.push({ id: novelKey, field: 'novelConversation', from: url, to: null, reason: 'stale_conversation' });
+    }
+  }
   return changes;
 }
 
@@ -353,6 +375,10 @@ function applyChanges(loaded, changes) {
     if (change.field === 'currentTaskId') {
       loaded.state.currentTaskId = null;
       loaded.state.currentNovelKey = null;
+      continue;
+    }
+    if (change.field === 'novelConversation') {
+      if (loaded.state?.novelConversations) delete loaded.state.novelConversations[change.id];
       continue;
     }
     const task = loaded.state?.tasks?.[change.id];
