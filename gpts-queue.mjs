@@ -2,6 +2,31 @@ import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { acquireQueueLock, releaseQueueLock } from './queue-lock.mjs';
+
+let queueLockHandle = null;
+let signalExitStarted = false;
+
+async function releaseLockAndExit(signal) {
+  if (signalExitStarted) return;
+  signalExitStarted = true;
+  const exitCode = signal === 'SIGINT' ? 130 : 143;
+  try {
+    await releaseQueueLock(queueLockHandle);
+    queueLockHandle = null;
+  } catch (err) {
+    console.error(`Failed to release queue lock: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    process.exit(exitCode);
+  }
+}
+
+process.once('SIGINT', () => {
+  void releaseLockAndExit('SIGINT');
+});
+process.once('SIGTERM', () => {
+  void releaseLockAndExit('SIGTERM');
+});
 
 const DEFAULT_CONFIG = {
   cdpUrl: 'http://127.0.0.1:9222',
@@ -165,7 +190,24 @@ async function atomicWrite(file, text) {
   await ensureDir(path.dirname(file));
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   await fs.writeFile(tmp, text, 'utf8');
-  await fs.rename(tmp, file);
+  // Windows 上 rename 可能因杀毒软件/索引服务锁定目标文件而失败(EPERM)，
+  // 重试几次，每次间隔递增。
+  let lastErr;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await fs.rename(tmp, file);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (err.code !== 'EPERM' && err.code !== 'EBUSY' && err.code !== 'EACCES') throw err;
+      // 重新写入 tmp 文件（上次 rename 失败后 tmp 可能已被移走或仍存在）
+      if (attempt < 5) {
+        try { await fs.writeFile(tmp, text, 'utf8'); } catch { /* ignore */ }
+        await new Promise((r) => setTimeout(r, 500 * attempt));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 async function appendLog(cfg, line) {
@@ -275,10 +317,13 @@ async function buildTasks(cfg, opts) {
       };
       task.outputPath = outputPathForTask(cfg, task);
       tasks.push(task);
-      if (opts.limit > 0 && tasks.length >= opts.limit) return tasks;
     }
   }
 
+  // --limit is intentionally NOT applied here: capping the built list would also
+  // cap already-done tasks, so a bounded resume against a mostly-finished queue
+  // would see "No pending tasks" instead of processing the next N pending ones.
+  // The limit is enforced in the processing loop in main().
   return tasks;
 }
 
@@ -844,73 +889,97 @@ async function main() {
   const projectRoot = process.cwd();
   const cfg = await loadConfig(opts.configPath, projectRoot);
   validateConfig(cfg, opts.dryRun);
-
-  const tasks = await buildTasks(cfg, opts);
-  const state = await loadState(cfg, opts);
-  mergeStateTasks(cfg, state, tasks, opts);
-  await saveState(cfg, state);
-
-  if (opts.dryRun) {
-    await printDryRun(projectRoot, cfg, state, tasks, opts);
-    return;
-  }
-
-  const nextTask = firstRunnableTask(cfg, state, tasks, opts);
-  if (!nextTask) {
-    console.log('No pending tasks.');
-    return;
-  }
-
-  const { chromium } = await loadPlaywright();
-  const browser = await chromium.connectOverCDP(cfg.cdpUrl);
-  const context = browser.contexts()[0] || (await browser.newContext());
-  const page = context.pages().find((p) => p.url().startsWith('https://chatgpt.com/')) || (await context.newPage());
-
-  let ok = 0;
-  let failed = 0;
-
   try {
-    for (const task of tasks) {
-      const key = taskStateKey(task);
-      const item = state.tasks[key];
-      const outputExists = fssync.existsSync(task.outputPath);
-      if (!opts.force && cfg.skipExisting && outputExists) continue;
-      if (item.status === 'done' && !opts.force) continue;
-
-      state.currentTaskId = task.id;
-      state.currentNovelKey = task.novelKey;
-      await saveState(cfg, state);
-
-      const files = task.inputFiles.map((x) => x.relativePath).join(' + ');
-      console.log(`\n[${task.index + 1}/${tasks.length}] ${task.id} novel="${task.novelName}" ${files}`);
-      try {
-        const chars = await processTask(page, cfg, state, task, item);
-        ok++;
-        state.currentTaskId = null;
-        await saveState(cfg, state);
-        console.log(`  OK -> ${displayPath(projectRoot, task.outputPath)} (${chars} chars)`);
-      } catch (err) {
-        failed++;
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`  FAIL: ${msg}`);
-        console.error('  Queue stopped at this task. Fix/retry this task before later tasks run.');
-        process.exitCode = 1;
-        break;
-      }
-
-      if (Number(cfg.betweenItemsMs || 0) > 0) {
-        await page.waitForTimeout(Number(cfg.betweenItemsMs));
-      }
+    if (!opts.dryRun || opts.resetState) {
+      queueLockHandle = await acquireQueueLock(projectRoot, {
+        command: 'gpts-queue',
+        config: displayPath(projectRoot, cfg.configPath),
+        argv: process.argv.slice(2),
+      });
     }
-  } finally {
-    await browser.close();
-  }
 
-  const remaining = tasks.filter((task) => {
-    const item = state.tasks[taskStateKey(task)];
-    return item?.status !== 'done';
-  }).length;
-  console.log(`\nDone: success ${ok}, failed ${failed}, remaining ${remaining}`);
+    const tasks = await buildTasks(cfg, opts);
+    const state = await loadState(cfg, opts);
+    mergeStateTasks(cfg, state, tasks, opts);
+
+    // A plain dry run is a read-only preview. --reset-state remains an explicit mutation.
+    if (!opts.dryRun || opts.resetState) await saveState(cfg, state);
+
+    if (opts.dryRun) {
+      await printDryRun(projectRoot, cfg, state, tasks, opts);
+      return;
+    }
+
+    const nextTask = firstRunnableTask(cfg, state, tasks, opts);
+    if (!nextTask) {
+      console.log('No pending tasks.');
+      return;
+    }
+
+    const { chromium } = await loadPlaywright();
+    const browser = await chromium.connectOverCDP(cfg.cdpUrl);
+    const context = browser.contexts()[0] || (await browser.newContext());
+    const page = context.pages().find((p) => p.url().startsWith('https://chatgpt.com/')) || (await context.newPage());
+
+    let ok = 0;
+    let failed = 0;
+    let processed = 0;
+
+    try {
+      for (const task of tasks) {
+        const key = taskStateKey(task);
+        const item = state.tasks[key];
+        const outputExists = fssync.existsSync(task.outputPath);
+        if (!opts.force && cfg.skipExisting && outputExists) continue;
+        if (item.status === 'done' && !opts.force) continue;
+
+        // --limit bounds the number of pending tasks processed in a single run,
+        // not the size of the task list. Stop before starting a task that would
+        // exceed the budget so currentTaskId stays clean.
+        if (opts.limit > 0 && processed >= opts.limit) {
+          console.log(`\nReached --limit ${opts.limit}; stopping run with ${ok} done, ${failed} failed.`);
+          break;
+        }
+        processed++;
+
+        state.currentTaskId = task.id;
+        state.currentNovelKey = task.novelKey;
+        await saveState(cfg, state);
+
+        const files = task.inputFiles.map((x) => x.relativePath).join(' + ');
+        console.log(`\n[${task.index + 1}/${tasks.length}] ${task.id} novel="${task.novelName}" ${files}`);
+        try {
+          const chars = await processTask(page, cfg, state, task, item);
+          ok++;
+          state.currentTaskId = null;
+          await saveState(cfg, state);
+          console.log(`  OK -> ${displayPath(projectRoot, task.outputPath)} (${chars} chars)`);
+        } catch (err) {
+          failed++;
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`  FAIL: ${msg}`);
+          console.error('  Queue stopped at this task. Fix/retry this task before later tasks run.');
+          process.exitCode = 1;
+          break;
+        }
+
+        if (Number(cfg.betweenItemsMs || 0) > 0) {
+          await page.waitForTimeout(Number(cfg.betweenItemsMs));
+        }
+      }
+    } finally {
+      await browser.close();
+    }
+
+    const remaining = tasks.filter((task) => {
+      const item = state.tasks[taskStateKey(task)];
+      return item?.status !== 'done';
+    }).length;
+    console.log(`\nDone: success ${ok}, failed ${failed}, remaining ${remaining}`);
+  } finally {
+    await releaseQueueLock(queueLockHandle);
+    queueLockHandle = null;
+  }
 }
 
 main().catch((err) => {

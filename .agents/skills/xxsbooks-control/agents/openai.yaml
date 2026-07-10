@@ -1,0 +1,4 @@
+interface:
+  display_name: "XXSBooks Control"
+  short_description: "Safely inspect and control the XXSBooks queue"
+  default_prompt: "Use $xxsbooks-control to inspect queue status and safely perform the requested control action."

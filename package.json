@@ -9,6 +9,12 @@
   },
   "scripts": {
     "chrome": "powershell -NoProfile -ExecutionPolicy Bypass -File ./start-chrome.ps1",
+    "control": "node control.mjs",
+    "status": "node control.mjs status --json",
+    "queue:start": "node control.mjs start",
+    "queue:resume": "node control.mjs resume",
+    "queue:stop": "node control.mjs stop",
+    "queue:reconcile": "node control.mjs reconcile",
     "start": "npm run chai",
     "dry-run": "npm run chai:dry",
     "force": "npm run chai:force",
@@ -22,7 +28,7 @@
     "xie:dry": "node gpts-queue.mjs --config config-xie.json --dry-run",
     "xie:force": "node gpts-queue.mjs --config config-xie.json --force",
     "xie:reset": "node gpts-queue.mjs --config config-xie.json --reset-state --dry-run",
-    "check": "node --check gpts-queue.mjs"
+    "check": "node --check gpts-queue.mjs && node --check queue-lock.mjs && node --check control.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.49.0"
