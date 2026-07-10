@@ -284,12 +284,23 @@ function timeoutFor(command) {
   return COMMAND_TIMEOUTS[command] || COMMAND_TIMEOUTS.default;
 }
 
-// 通用写操作包装：先校验同源 + 互斥，再执行 control.mjs，最后回读状态
+// 通用写操作包装：先校验同源 + 参数，再获取互斥锁，执行 control.mjs，最后回读状态
 async function runWriteAction(req, res, buildArgs, { timeout = 30_000, rerunStatus = true } = {}) {
   if (!isSameOriginWrite(req, /* port injected later */ runWriteAction.port)) {
     throw new HttpError(403, '拒绝非同源写请求。请使用服务器输出的 127.0.0.1 地址打开面板。');
   }
   const body = await readJsonBody(req);
+
+  // 参数校验在获取写锁之前：避免无效请求占用锁 + 浪费 status 调用
+  let args;
+  try {
+    args = buildArgs(body);
+  } catch (error) {
+    const status = error instanceof HttpError ? error.status : 400;
+    sendJson(res, status, { ok: false, error: error.message });
+    return;
+  }
+
   acquireWriteLock();
   try {
     let before = null;
@@ -307,7 +318,6 @@ async function runWriteAction(req, res, buildArgs, { timeout = 30_000, rerunStat
     let result = null;
     let actionError = null;
     try {
-      const args = buildArgs(body);
       result = await runControl(args, timeout);
     } catch (error) {
       actionError = error;
@@ -324,7 +334,10 @@ async function runWriteAction(req, res, buildArgs, { timeout = 30_000, rerunStat
     }
 
     if (actionError) {
-      sendJson(res, 409, {
+      // HttpError = 参数校验错误（4xx），返回对应状态码
+      // ControlError = 脚本执行错误，返回 409
+      const status = actionError instanceof HttpError ? actionError.status : 409;
+      sendJson(res, status, {
         ok: false,
         error: actionError.message,
         cause: publicError(actionError),
