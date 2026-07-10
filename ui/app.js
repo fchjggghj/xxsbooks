@@ -644,4 +644,20 @@ setupTabs();
 setupEventListeners();
 refreshStatus();
 refreshLogs({ quiet: true });
-setInterval(() => refreshStatus({ quiet: true }), 5000);
+
+// 动态轮询：页面可见时轮询，隐藏时暂停；上一次未完成不发新请求
+let pollTimer = null;
+function schedulePoll() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    pollTimer = null;
+    if (document.visibilityState === 'visible' && !statusLoading) {
+      await refreshStatus({ quiet: true });
+    }
+    schedulePoll();
+  }, 5000);
+}
+schedulePoll();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !pollTimer) schedulePoll();
+});

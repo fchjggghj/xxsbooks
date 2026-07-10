@@ -19,3 +19,9 @@ node_modules/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# 压力测试临时数据
+stress-test-data/
+
+# 启动日志
+logs/

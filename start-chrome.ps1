@@ -48,10 +48,18 @@ function Open-CdpTab {
 }
 
 New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null
-Set-Content -LiteralPath (Join-Path $ProfileDir "GPTS_QUEUE_PROFILE_DO_NOT_DELETE.txt") -Encoding UTF8 -Value @(
-  "This is the persistent Chrome profile for gpts-queue automation.",
-  "Do not delete it unless you want to lose the ChatGPT login state."
-)
+# 写入标识文件；权限不足（目录由管理员创建过）时静默跳过，不阻断启动
+try {
+  $marker = Join-Path $ProfileDir "GPTS_QUEUE_PROFILE_DO_NOT_DELETE.txt"
+  if (-not (Test-Path -LiteralPath $marker)) {
+    Set-Content -LiteralPath $marker -Encoding UTF8 -Value @(
+      "This is the persistent Chrome profile for gpts-queue automation.",
+      "Do not delete it unless you want to lose the ChatGPT login state."
+    ) -ErrorAction Stop
+  }
+} catch {
+  Write-Host "提示：无法写入 $ProfileDir 标识文件（权限不足），但不影响 Chrome 启动。" -ForegroundColor DarkGray
+}
 
 if (Test-CdpReady -CheckPort $Port) {
   Write-Host "Chrome CDP is already ready at http://127.0.0.1:$Port"

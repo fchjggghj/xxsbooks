@@ -111,7 +111,7 @@ function runNodeScript(scriptFile, args, timeout = 20_000, { expectJson = false 
         cwd: projectRoot,
         windowsHide: true,
         timeout,
-        maxBuffer: 8 * 1024 * 1024,
+        maxBuffer: 32 * 1024 * 1024,  // 32MB：大项目 state.json 可能达数 MB
         encoding: 'utf8',
       },
       (error, stdout, stderr) => {
@@ -268,6 +268,22 @@ function releaseWriteLock() {
   writeBusy = false;
 }
 
+// 不同命令的超时：大项目（1000万字 ≈ 3000章）时 status/reconcile/normalize 可能较慢
+const COMMAND_TIMEOUTS = {
+  status: 30_000,      // 大项目 state.json 可达数 MB
+  preflight: 90_000,   // 包含 CDP + 文件扫描
+  reconcile: 120_000,  // 对比 state 与磁盘，大项目慢
+  progress: 120_000,   // 遍历所有书/卷
+  normalize: 120_000,  // 重命名大量文件
+  import: 300_000,     // 复制大量文件
+  'preview-volumes': 120_000,
+  default: 30_000,
+};
+
+function timeoutFor(command) {
+  return COMMAND_TIMEOUTS[command] || COMMAND_TIMEOUTS.default;
+}
+
 // 通用写操作包装：先校验同源 + 互斥，再执行 control.mjs，最后回读状态
 async function runWriteAction(req, res, buildArgs, { timeout = 30_000, rerunStatus = true } = {}) {
   if (!isSameOriginWrite(req, /* port injected later */ runWriteAction.port)) {
@@ -377,12 +393,12 @@ async function handleReconcile(req, res) {
     const args = ['reconcile', stage];
     if (body.apply) args.push('--apply');
     return args;
-  });
+  }, { timeout: timeoutFor('reconcile') });
 }
 
 // 生成每本书的 进度.md
 async function handleProgress(req, res) {
-  await runWriteAction(req, res, () => ['progress']);
+  await runWriteAction(req, res, () => ['progress'], { timeout: timeoutFor('progress') });
 }
 
 // 章节编号补零重命名：normalize <书名> [卷名] [--apply]
@@ -395,7 +411,7 @@ async function handleNormalize(req, res) {
     if (volume) args.push(volume);
     if (body.apply) args.push('--apply');
     return args;
-  });
+  }, { timeout: timeoutFor('normalize') });
 }
 
 // 导入新书：import-newbooks.mjs <源目录> [--apply]
@@ -411,7 +427,7 @@ async function handleImport(req, res) {
   try {
     const args = [source];
     if (body.apply) args.push('--apply');
-    const result = await runNodeScript(importScript, args, 120_000);
+    const result = await runNodeScript(importScript, args, timeoutFor('import'));
     sendJson(res, 200, { ok: true, result });
   } finally {
     releaseWriteLock();
@@ -430,7 +446,7 @@ async function handlePreviewVolumes(req, res) {
   acquireWriteLock();
   try {
     const args = [source];
-    const result = await runNodeScript(previewScript, args, 60_000);
+    const result = await runNodeScript(previewScript, args, timeoutFor('preview-volumes'));
     sendJson(res, 200, { ok: true, result });
   } finally {
     releaseWriteLock();
@@ -623,11 +639,11 @@ function createServer(port) {
 
       // 只读接口
       if (method === 'GET' && pathname === '/api/status') {
-        sendJson(res, 200, await runControl(['status']));
+        sendJson(res, 200, await runControl(['status'], timeoutFor('status')));
         return;
       }
       if (method === 'GET' && pathname === '/api/preflight') {
-        sendJson(res, 200, await runControl(['preflight'], 60_000));
+        sendJson(res, 200, await runControl(['preflight'], timeoutFor('preflight')));
         return;
       }
       if (method === 'GET' && pathname === '/api/logs') {
