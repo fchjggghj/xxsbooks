@@ -26,8 +26,12 @@ Usage:
   node control.mjs resume <chai|xie> [--limit N] [--json]
   node control.mjs stop [--json]
   node control.mjs reconcile <chai|xie|all> [--apply] [--json]
+  node control.mjs preflight [--json]
+  node control.mjs normalize <书名> [--json]
 
-status and reconcile without --apply are read-only. start/resume run in the background.`;
+status and reconcile without --apply are read-only. start/resume run in the background.
+preflight: 跑前预检（Chrome/CDP/登录态/输入文件齐全/编号连续）。
+normalize: 把指定书的原文文件自动补零重命名。`;
 }
 
 function parseArgs(argv) {
@@ -373,6 +377,28 @@ async function atomicWriteJson(file, value) {
   throw lastError;
 }
 
+// 原子写文本文件（进度.md 用），Windows 上 rename 可能因锁失败，重试几次
+async function atomicWriteText(file, text) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(tmp, text, 'utf8');
+  let lastError;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await fs.rename(tmp, file);
+      return;
+    } catch (err) {
+      lastError = err;
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes(err?.code)) throw err;
+      if (attempt < 5) {
+        await delay(250 * attempt);
+        await fs.writeFile(tmp, text, 'utf8').catch(() => {});
+      }
+    }
+  }
+  throw lastError;
+}
+
 function applyChanges(loaded, changes) {
   for (const change of changes) {
     if (change.field === 'currentTaskId') {
@@ -455,13 +481,209 @@ function printResult(result, asJson) {
     console.log(`CDP: ${result.cdp.ready ? 'ready' : 'offline'} (${result.cdp.url})`);
     console.log(`Lock: ${result.lock.active ? `active PID ${result.lock.info?.pid}` : result.lock.stale ? 'stale' : 'idle'}`);
     for (const stage of Object.values(result.stages)) {
+      const total = stage.taskCount || 0;
+      const done = stage.counts.done || 0;
+      const bar = progressBar(done, total);
       console.log(
-        `${stage.stage}: done=${stage.counts.done} failed=${stage.counts.failed} pending=${stage.counts.pending} running=${stage.counts.running} missing=${stage.missingOutputs.length}`,
+        `${stage.stage}: ${bar} done=${done} failed=${stage.counts.failed} pending=${stage.counts.pending} running=${stage.counts.running} missing=${stage.missingOutputs.length}`,
       );
     }
   } else {
     console.log(JSON.stringify(result, null, 2));
   }
+}
+
+// 进度条：done/total 用方块字符展示
+function progressBar(done, total, width = 10) {
+  if (!total) return `[${'░'.repeat(width)}] 0/0`;
+  const filled = Math.round((done / total) * width);
+  const pct = Math.round((done / total) * 100);
+  return `[${'█'.repeat(filled)}${'░'.repeat(width - filled)}] ${done}/${total} ${pct}%`;
+}
+
+// 为每本书目录生成 进度.md，资源管理器里打开书目录就能看到进度
+async function writeBookProgressFiles(statusResult) {
+  const chaiStage = statusResult.stages.chai;
+  const xieStage = statusResult.stages.xie;
+  if (!chaiStage && !xieStage) return;
+
+  // 从 state.tasks 收集每本书的进度
+  const bookProgress = new Map();
+  for (const stageInfo of [chaiStage, xieStage].filter(Boolean)) {
+    const loaded = await loadStage(stageInfo.stage);
+    if (!loaded.state?.tasks) continue;
+    for (const task of Object.values(loaded.state.tasks)) {
+      const key = task.novelKey;
+      if (!bookProgress.has(key)) {
+        bookProgress.set(key, { book: task.novelName || key, chai: { done: 0, total: 0 }, xie: { done: 0, total: 0 } });
+      }
+      const bp = bookProgress.get(key);
+      bp[stageInfo.stage].total++;
+      if (task.status === 'done') bp[stageInfo.stage].done++;
+    }
+  }
+
+  const booksDir = resolveFromRoot('书籍');
+  for (const [key, bp] of bookProgress) {
+    const bookDir = path.join(booksDir, key);
+    if (!fssync.existsSync(bookDir)) continue;
+    const lines = [
+      `# ${bp.book} 进度`,
+      '',
+      `更新时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`,
+      '',
+      `## 拆分 (chai)`,
+      `${progressBar(bp.chai.done, bp.chai.total)}  ${bp.chai.done}/${bp.chai.total} 章`,
+      '',
+      `## 正文 (xie)`,
+      `${progressBar(bp.xie.done, bp.xie.total)}  ${bp.xie.done}/${bp.xie.total} 章`,
+      '',
+    ];
+    await atomicWriteText(path.join(bookDir, '进度.md'), lines.join('\n'));
+  }
+}
+
+// 跑前预检：Chrome/CDP/登录态/输入文件齐全/编号连续
+async function preflight() {
+  const checks = [];
+  const chaiCfg = await readJson(path.join(projectRoot, STAGES.chai));
+
+  // 1. CDP 可达性
+  const cdp = await cdpStatus();
+  checks.push({ name: 'Chrome CDP', ok: cdp.ready, detail: cdp.ready ? `ready (${cdp.url})` : `offline (${cdp.url})，请先运行 npm run chrome` });
+
+  // 2. 登录态：访问 chatgpt.com 看是否跳转到登录页
+  if (cdp.ready) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const resp = await fetch('https://chatgpt.com/', { signal: ctrl.signal, redirect: 'manual' });
+      clearTimeout(timer);
+      const loggedIn = resp.status === 200 || (resp.status >= 300 && resp.status < 400 && (resp.headers.get('location') || '').includes('chatgpt.com'));
+      checks.push({ name: 'ChatGPT 登录态', ok: loggedIn, detail: loggedIn ? '已登录' : `状态码 ${resp.status}，可能未登录或会话过期` });
+    } catch (err) {
+      checks.push({ name: 'ChatGPT 登录态', ok: false, detail: `检查失败: ${err.message}` });
+    }
+  } else {
+    checks.push({ name: 'ChatGPT 登录态', ok: false, detail: '跳过（CDP 不可达）' });
+  }
+
+  // 3. GPTS 地址格式
+  for (const [stageName, configFile] of Object.entries(STAGES)) {
+    const cfg = await readJson(path.join(projectRoot, configFile));
+    const valid = String(cfg.gptUrl || '').startsWith('https://chatgpt.com/g/');
+    checks.push({ name: `${stageName} GPTS 地址`, ok: valid, detail: valid ? cfg.gptUrl : `无效: ${cfg.gptUrl}` });
+  }
+
+  // 4. 每本书输入文件齐全 + 编号连续
+  const booksDir = resolveFromRoot(chaiCfg.inputDir || '书籍');
+  const inputSubdir = chaiCfg.inputSubdir || '';
+  if (fssync.existsSync(booksDir)) {
+    const entries = await fs.readdir(booksDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      const sourceDir = inputSubdir ? path.join(booksDir, entry.name, inputSubdir) : path.join(booksDir, entry.name);
+      if (!fssync.existsSync(sourceDir)) {
+        checks.push({ name: `${entry.name} 输入目录`, ok: false, detail: `目录不存在: ${path.relative(projectRoot, sourceDir)}` });
+        continue;
+      }
+      const files = (await fs.readdir(sourceDir, { withFileTypes: true }))
+        .filter((e) => e.isFile() && ['.txt', '.md'].includes(path.extname(e.name).toLowerCase()))
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN', { numeric: true }));
+      if (files.length === 0) {
+        checks.push({ name: `${entry.name} 输入文件`, ok: false, detail: '没有 .txt/.md 文件' });
+        continue;
+      }
+      // 检查编号连续性
+      const issues = [];
+      const nums = files.map((f) => parseInt(path.parse(f).name.replace(/\D/g, ''), 10)).filter((n) => !isNaN(n));
+      if (nums.length === files.length) {
+        const max = Math.max(...nums);
+        for (let i = 1; i <= max; i++) {
+          if (!nums.includes(i)) issues.push(`缺第${i}章`);
+        }
+      } else if (nums.length > 0) {
+        issues.push('部分文件名无法解析为编号');
+      }
+      checks.push({ name: `${entry.name} 输入文件`, ok: issues.length === 0, detail: `${files.length} 个文件${issues.length ? '，问题: ' + issues.join(', ') : '，编号连续'}` });
+    }
+  }
+
+  // 5. 锁状态
+  const lock = await readQueueLock(projectRoot);
+  checks.push({ name: '队列锁', ok: !lock.active, detail: lock.active ? `占用中 PID ${lock.info?.pid}` : '空闲' });
+
+  const allOk = checks.every((c) => c.ok);
+  return { ok: allOk, command: 'preflight', checks, summary: `${checks.filter((c) => c.ok).length}/${checks.length} 通过` };
+}
+
+// 中文数字转阿拉伯数字，用于正确排序"第一章/第二章"等文件名
+const CN_NUM_MAP = { '一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10 };
+function chineseNumToArabic(str) {
+  // 匹配 十X、X十、X十X、X百X十X 等常见形式
+  const match = str.match(/[一二两三四五六七八九十百千]+/);
+  if (!match) return null;
+  const s = match[0];
+  if (s === '十') return 10;
+  if (s.startsWith('十')) return 10 + (CN_NUM_MAP[s[1]] || 0);
+  if (s.endsWith('十') && s.length === 2) return CN_NUM_MAP[s[0]] * 10;
+  if (s.includes('十') && s.length === 3) return (CN_NUM_MAP[s[0]] || 0) * 10 + (CN_NUM_MAP[s[2]] || 0);
+  // 纯个位
+  if (s.length === 1) return CN_NUM_MAP[s] || null;
+  return null;
+}
+
+// 提取文件名中的序号（阿拉伯数字优先，其次中文数字），用于正确排序
+function extractFileOrder(name) {
+  const base = path.parse(name).name;
+  // 先试阿拉伯数字
+  const arabic = base.match(/\d+/);
+  if (arabic) return Number(arabic[0]);
+  // 再试中文数字
+  const cn = chineseNumToArabic(base);
+  return cn !== null ? cn : 0;
+}
+
+// 章节编号自动补零：把任意文件名重命名为 0001.txt / 0002.txt ...
+async function normalizeBook(bookName) {
+  if (!bookName) throw new Error('请指定书名，例如: node control.mjs normalize 测试书');
+  const chaiCfg = await readJson(path.join(projectRoot, STAGES.chai));
+  const booksDir = resolveFromRoot(chaiCfg.inputDir || '书籍');
+  const inputSubdir = chaiCfg.inputSubdir || '';
+  const bookDir = path.join(booksDir, bookName);
+  const sourceDir = inputSubdir ? path.join(bookDir, inputSubdir) : bookDir;
+
+  if (!fssync.existsSync(sourceDir)) throw new Error(`源目录不存在: ${path.relative(projectRoot, sourceDir)}`);
+
+  const files = (await fs.readdir(sourceDir, { withFileTypes: true }))
+    .filter((e) => e.isFile() && ['.txt', '.md'].includes(path.extname(e.name).toLowerCase()))
+    .map((e) => e.name)
+    .sort((a, b) => {
+      const oa = extractFileOrder(a);
+      const ob = extractFileOrder(b);
+      if (oa !== ob) return oa - ob;
+      return a.localeCompare(b, 'zh-Hans-CN', { numeric: true });
+    });
+
+  if (files.length === 0) throw new Error(`${path.relative(projectRoot, sourceDir)} 下没有 .txt/.md 文件`);
+
+  const width = Math.max(4, String(files.length).length);
+  const renamed = [];
+  const skipped = [];
+  for (let i = 0; i < files.length; i++) {
+    const oldName = files[i];
+    const ext = path.extname(oldName);
+    const newName = `${String(i + 1).padStart(width, '0')}${ext}`;
+    if (oldName === newName) { skipped.push(oldName); continue; }
+    const oldPath = path.join(sourceDir, oldName);
+    const newPath = path.join(sourceDir, newName);
+    if (fssync.existsSync(newPath)) throw new Error(`目标文件已存在: ${newName}，请先处理冲突`);
+    fssync.renameSync(oldPath, newPath);
+    renamed.push({ from: oldName, to: newName });
+  }
+
+  return { ok: true, command: 'normalize', book: bookName, dir: path.relative(projectRoot, sourceDir), renamed: renamed.length, skipped: skipped.length, details: renamed };
 }
 
 async function main() {
@@ -476,6 +698,8 @@ async function main() {
   if (command === 'status') {
     const stage = requireStage(positional[1] || 'all', true);
     result = await buildStatus(stage);
+    // 生成每本书的 进度.md
+    await writeBookProgressFiles(result).catch(() => {});
   } else if (command === 'start' || command === 'resume') {
     const stage = requireStage(positional[1]);
     if (command === 'resume' && options.force) throw new Error('resume does not accept --force.');
@@ -485,6 +709,10 @@ async function main() {
   } else if (command === 'reconcile') {
     const stage = requireStage(positional[1] || 'all', true);
     result = await reconcile(stage, options.apply);
+  } else if (command === 'preflight') {
+    result = await preflight();
+  } else if (command === 'normalize') {
+    result = await normalizeBook(positional[1]);
   } else {
     throw new Error(`Unknown command: ${command}\n\n${usage()}`);
   }
