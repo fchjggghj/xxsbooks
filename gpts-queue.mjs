@@ -1137,8 +1137,8 @@ async function processTask(page, cfg, state, task, taskState) {
   const normalMaxAttempts = cfg.maxRetries + 1;
   // 安全前缀会累加：每次安全重试再追加一句声明，让 GPTS 重新评估
   let safetyPrefixCount = 0;
-  // recoveryLog 收集每次恢复动作，最终写入聊天记录的 frontmatter
-  const recoveryLog = [];
+  // recoveryLog 记录恢复动作，写入 taskState（state.json），便于事后追溯
+  taskState.recoveryLog = taskState.recoveryLog || [];
 
   for (;;) {
     // 决定本次 method：已发送过且配置了 edit-and-resend 则编辑重发，否则新发
@@ -1160,23 +1160,10 @@ async function processTask(page, cfg, state, task, taskState) {
       await saveState(cfg, state);
       await appendLog(cfg, `TASK ${task.id} method=${method} rateRetry=${rateLimitRetries} safetyRetry=${safetyRetries} normalRetry=${normalRetries}`);
 
-      const sentAt = nowIso();
       const reply = await sendOrEdit(page, cfg, task, prompt, method);
 
-      // 写入聊天记录格式：frontmatter 元信息 + 问 + 答
-      const record = buildChatRecord({
-        book: task.novelName,
-        chapter: task.localId,
-        stage: cfg.stage,
-        conversationUrl: page.url(),
-        sentAt,
-        method,
-        rateLimitRetries,
-        safetyRetries,
-        normalRetries,
-        recoveryLog,
-      }, prompt, reply);
-      await atomicWrite(task.outputPath, record);
+      // 只保存回复内容；元信息（对话地址/时间/重试/恢复过程）已在 taskState 里，持久化到 state.json
+      await atomicWrite(task.outputPath, reply.trim() + '\n');
       await fs.rm(`${task.outputPath}.error.txt`, { force: true });
 
       state.currentConversationUrl = page.url();
@@ -1215,7 +1202,8 @@ async function processTask(page, cfg, state, task, taskState) {
         rateLimitRetries++;
         const waitMs = Number(cfg.rateLimitWaitMs || 900000);
         const waitMin = Math.round(waitMs / 60000);
-        recoveryLog.push({ time: nowIso(), kind: 'rate_limit', action: `wait_${waitMin}min`, retry: rateLimitRetries });
+        taskState.recoveryLog.push({ time: nowIso(), kind: 'rate_limit', action: `wait_${waitMin}min`, retry: rateLimitRetries });
+        await saveState(cfg, state);
         await appendLog(cfg, `TASK ${task.id} rate_limit retry=${rateLimitRetries}/${cfg.rateLimitMaxAttempts} waiting ${waitMin}min`);
         console.log(`  额度限制，等待 ${waitMin} 分钟后重发第 ${rateLimitRetries} 次...`);
         await page.waitForTimeout(waitMs);
@@ -1226,7 +1214,8 @@ async function processTask(page, cfg, state, task, taskState) {
       if (kind === 'safety' && safetyRetries < Number(cfg.safetyMaxAttempts || 5)) {
         safetyRetries++;
         safetyPrefixCount++;
-        recoveryLog.push({ time: nowIso(), kind: 'safety', action: `add_safety_prefix x${safetyPrefixCount}`, retry: safetyRetries });
+        taskState.recoveryLog.push({ time: nowIso(), kind: 'safety', action: `add_safety_prefix x${safetyPrefixCount}`, retry: safetyRetries });
+        await saveState(cfg, state);
         await appendLog(cfg, `TASK ${task.id} safety retry=${safetyRetries}/${cfg.safetyMaxAttempts} prefixCount=${safetyPrefixCount}`);
         console.log(`  安全拦截，加安全声明前缀后重发第 ${safetyRetries} 次...`);
         continue;
@@ -1234,7 +1223,7 @@ async function processTask(page, cfg, state, task, taskState) {
 
       // 3) 其他错误：走原有 maxRetries 逻辑
       normalRetries++;
-      recoveryLog.push({ time: nowIso(), kind, action: 'normal_retry', retry: normalRetries });
+      taskState.recoveryLog.push({ time: nowIso(), kind, action: 'normal_retry', retry: normalRetries });
       if (normalRetries >= normalMaxAttempts) {
         await atomicWrite(`${task.outputPath}.error.txt`, `${lastError}\n`);
         throw new Error(lastError);
