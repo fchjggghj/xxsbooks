@@ -2,10 +2,17 @@ import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { randomUUID } from 'node:crypto';
 import { acquireQueueLock, releaseQueueLock } from './queue-lock.mjs';
+import { sortVolumeNames } from './lib/naming.mjs';
+import { taskStateKey, mergeStateTasks, firstRunnableTask } from './lib/queue-state.mjs';
+import { classifyQueueError, safeAppendJsonlLog } from './lib/structured-log.mjs';
+import { collectPriorVolumeContext } from './lib/prior-context.mjs';
 
 let queueLockHandle = null;
 let signalExitStarted = false;
+const runId = randomUUID();
+const priorContextCache = new Map();
 
 async function releaseLockAndExit(signal) {
   if (signalExitStarted) return;
@@ -42,6 +49,12 @@ const DEFAULT_CONFIG = {
   volumeMode: false,
   // 前卷摘要注入：xie 处理某卷时，读取同书前序卷的拆分文件作为背景注入到 prompt 前
   priorVolumeContext: false,
+  // 优先读取每卷的摘要文件；没有摘要时才使用有界的原始拆分内容。
+  priorVolumeSummaryFile: '卷摘要.md',
+  priorVolumeContextMaxChars: 30000,
+  priorVolumeFallbackCharsPerVolume: 6000,
+  // 包含模板、当前章节、前卷背景和重试声明的总字符硬上限。
+  maxPromptChars: 120000,
   fileExtensions: ['.txt', '.md'],
   recursive: true,
   skipExisting: true,
@@ -184,7 +197,7 @@ async function detectPageError(page) {
 
 function parseArgs(argv) {
   const out = {
-    configPath: 'config.json',
+    configPath: 'config-chai.json',
     dryRun: false,
     force: false,
     limit: 0,
@@ -237,6 +250,9 @@ async function loadConfig(configPath, projectRoot) {
   cfg.chaptersPerPrompt = Math.max(1, Number(cfg.chaptersPerPrompt || 1));
   cfg.conversationScope = String(cfg.conversationScope || 'novel');
   cfg.maxRetries = Math.max(0, Number(cfg.maxRetries || 0));
+  cfg.priorVolumeContextMaxChars = Math.max(0, Number(cfg.priorVolumeContextMaxChars || 0));
+  cfg.priorVolumeFallbackCharsPerVolume = Math.max(0, Number(cfg.priorVolumeFallbackCharsPerVolume || 0));
+  cfg.maxPromptChars = Math.max(1, Number(cfg.maxPromptChars || 120000));
   cfg.stateFile = cfg.stateFile
     ? resolveFromRoot(projectRoot, cfg.stateFile)
     : path.join(cfg.outputDir, '.gpts-queue-state.json');
@@ -273,6 +289,15 @@ function validateConfig(cfg, dryRun) {
   if (cfg.conversationScope !== 'novel') {
     errors.push('conversationScope must be "novel"');
   }
+  if (cfg.priorVolumeContext && !cfg.volumeMode) {
+    errors.push('priorVolumeContext 只能在 volumeMode=true 时启用');
+  }
+  if (cfg.priorVolumeContext && !String(cfg.promptTemplate).includes('{{priorVolumes}}')) {
+    errors.push('启用 priorVolumeContext 时 promptTemplate 必须包含 {{priorVolumes}}');
+  }
+  if (!Number.isFinite(cfg.maxPromptChars) || cfg.maxPromptChars < 1000) {
+    errors.push('maxPromptChars 必须是不小于 1000 的数字');
+  }
   if (errors.length) throw new Error(errors.join('\n'));
 }
 
@@ -304,9 +329,16 @@ async function atomicWrite(file, text) {
   throw lastErr;
 }
 
-async function appendLog(cfg, line) {
-  await ensureDir(path.dirname(cfg.logFile));
-  await fs.appendFile(cfg.logFile, `${new Date().toISOString()} ${line}\n`, 'utf8');
+async function logEvent(cfg, event, fields = {}) {
+  return safeAppendJsonlLog(cfg.logFile, event, {
+    schemaVersion: 1,
+    runId,
+    stage: cfg.stage,
+    ...fields,
+  }, (error) => {
+    // 日志失败不得覆盖真实任务结果。
+    console.warn(`警告: 写入日志失败: ${error instanceof Error ? error.message : String(error)}`);
+  });
 }
 
 async function walkFiles(dir, recursive, extensions, root = dir) {
@@ -398,33 +430,6 @@ function fileNovelInfo(file) {
     novelName: name,
     hasNovelFolder: false,
   };
-}
-
-// 中文数字转阿拉伯，用于卷名正确排序（第一卷 < 第二卷 < ... < 第十一卷）
-const CN_NUM_MAP = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
-function chineseToArabic(str) {
-  const m = str.match(/[一二两三四五六七八九十百千]+/);
-  if (!m) return null;
-  const s = m[0];
-  if (s === '十') return 10;
-  if (s.startsWith('十')) return 10 + (CN_NUM_MAP[s[1]] || 0);
-  if (s.endsWith('十') && s.length === 2) return CN_NUM_MAP[s[0]] * 10;
-  if (s.includes('十') && s.length === 3) return (CN_NUM_MAP[s[0]] || 0) * 10 + (CN_NUM_MAP[s[2]] || 0);
-  if (s.length === 1) return CN_NUM_MAP[s] || null;
-  return null;
-}
-// 卷名排序：提取中文/阿拉伯数字排序，无数字时按 localeCompare
-function volumeSortKey(name) {
-  const arabic = name.match(/\d+/);
-  if (arabic) return Number(arabic[0]);
-  const cn = chineseToArabic(name);
-  return cn !== null ? cn : 0;
-}
-function sortVolumeNames(a, b) {
-  const ka = volumeSortKey(a);
-  const kb = volumeSortKey(b);
-  if (ka !== kb) return ka - kb;
-  return a.localeCompare(b, 'zh-Hans-CN', { numeric: true });
 }
 
 async function scanBookSource(cfg) {
@@ -524,8 +529,11 @@ async function scanBookSource(cfg) {
 }
 
 async function buildTasks(cfg, opts) {
-  await ensureDir(cfg.inputDir);
-  await ensureDir(cfg.outputDir);
+  // 普通 dry-run 必须零写入，目录只在真实运行时创建。
+  if (!opts.dryRun) {
+    await ensureDir(cfg.inputDir);
+    await ensureDir(cfg.outputDir);
+  }
 
   const files = await scanBookSource(cfg);
   const novels = new Map();
@@ -605,48 +613,6 @@ async function loadState(cfg, opts) {
 async function saveState(cfg, state) {
   state.updatedAt = nowIso();
   await atomicWrite(cfg.stateFile, JSON.stringify(state, null, 2) + '\n');
-}
-
-function taskStateKey(task) {
-  return task.id;
-}
-
-function mergeStateTasks(cfg, state, tasks, opts) {
-  const next = {};
-  for (const task of tasks) {
-    const key = taskStateKey(task);
-    const previous = state.tasks[key] || {};
-    const outputExists = fssync.existsSync(task.outputPath);
-    const status = !opts.force && cfg.skipExisting && outputExists ? 'done' : previous.status || 'pending';
-
-    next[key] = {
-      ...previous,
-      id: task.id,
-      localId: task.localId,
-      index: task.index,
-      novelKey: task.novelKey,
-      novelName: task.novelName,
-      inputFiles: task.inputFiles.map((x) => x.relativePath),
-      outputFile: task.outputPath,
-      status: opts.force && status === 'done' ? 'pending' : status,
-      retries: Number(previous.retries || 0),
-      lastError: previous.lastError || '',
-      sent: previous.sent === true,
-      conversationUrl: previous.conversationUrl || '',
-      updatedAt: previous.updatedAt || nowIso(),
-    };
-  }
-  state.tasks = next;
-}
-
-function firstRunnableTask(cfg, state, tasks, opts) {
-  for (const task of tasks) {
-    const item = state.tasks[taskStateKey(task)];
-    if (!item) return task;
-    if (!opts.force && cfg.skipExisting && fssync.existsSync(task.outputPath)) continue;
-    if (item.status !== 'done') return task;
-  }
-  return null;
 }
 
 async function loadPlaywright() {
@@ -981,50 +947,14 @@ async function waitForReply(page, beforeTexts, cfg) {
   throw new QueueError('Timed out waiting for GPTS reply.', 'timeout');
 }
 
-// 聊天记录格式：YAML frontmatter（元信息）+ 问 + 答，用 Markdown 标记分隔。
-// 下游读取时 extractAnswer() 提取「答」部分，纯文本文件原样返回（向后兼容）。
+// 旧版聊天记录的答案标记，仅用于向后兼容读取。
 const CHAT_ANSWER_MARKER = '## 🤖 答';
-const CHAT_QUESTION_MARKER = '## 👤 问';
 
 // 从聊天记录格式文件内容中提取「答」部分。非聊天记录格式原样返回。
 function extractAnswer(text) {
   const idx = text.indexOf(CHAT_ANSWER_MARKER);
   if (idx === -1) return text;
   return text.slice(idx + CHAT_ANSWER_MARKER.length).trim();
-}
-
-// 组装一轮完整对话记录：frontmatter 元信息 + 问 + 答
-function buildChatRecord(meta, question, answer) {
-  const fm = {
-    book: meta.book || '',
-    chapter: String(meta.chapter || ''),
-    stage: meta.stage || '',
-    conversationUrl: meta.conversationUrl || '',
-    sentAt: meta.sentAt || nowIso(),
-    method: meta.method || 'send',
-    retries: {
-      rateLimit: meta.rateLimitRetries || 0,
-      safety: meta.safetyRetries || 0,
-      normal: meta.normalRetries || 0,
-    },
-    recoveryLog: meta.recoveryLog || [],
-  };
-  const yaml = Object.entries(fm)
-    .map(([k, v]) => {
-      if (v === null || v === undefined) return `${k}: ''`;
-      if (typeof v === 'object') {
-        if (Array.isArray(v)) {
-          if (v.length === 0) return `${k}: []`;
-          const items = v.map((x) => `  - ${JSON.stringify(x)}`).join('\n');
-          return `${k}:\n${items}`;
-        }
-        const sub = Object.entries(v).map(([sk, sv]) => `  ${sk}: ${sv}`).join('\n');
-        return `${k}:\n${sub}`;
-      }
-      return `${k}: ${typeof v === 'string' && (v.includes(':') || v.includes('#')) ? JSON.stringify(v) : v}`;
-    })
-    .join('\n');
-  return `---\n${yaml}\n---\n\n${CHAT_QUESTION_MARKER}\n\n${question}\n\n${CHAT_ANSWER_MARKER}\n\n${answer.trim()}\n`;
 }
 
 async function readTaskContent(cfg, task) {
@@ -1046,39 +976,26 @@ async function readTaskContent(cfg, task) {
 // novelKey = "书名/卷名"，提取书名，找到该书目录下排在当前卷之前的卷，
 // 读取它们的 outputSubdir（拆分）目录下所有文件，拼接成背景文本。
 async function collectPriorVolumes(cfg, task) {
-  if (!cfg.priorVolumeContext) return '';
-  if (!task.volumeKey || !task.volumeKey.includes('/')) return '';
+  if (!cfg.priorVolumeContext || !task.volumeKey?.includes('/')) {
+    return { text: '', charCount: 0, truncated: false, sources: [], volumeCount: 0 };
+  }
+  const cacheKey = `${cfg.configPath}\u0000${task.volumeKey}`;
+  if (priorContextCache.has(cacheKey)) return priorContextCache.get(cacheKey);
 
   const [bookName, currentVolume] = task.volumeKey.split('/');
-  const bookDir = path.join(cfg.inputDir, bookName);
-  if (!fssync.existsSync(bookDir)) return '';
-
-  const entries = await fs.readdir(bookDir, { withFileTypes: true });
-  const volumeDirs = entries
-    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-    .map((e) => e.name)
-    .sort(sortVolumeNames);
-
-  const currentIdx = volumeDirs.indexOf(currentVolume);
-  if (currentIdx <= 0) return ''; // 第一卷或找不到，无前卷
-
-  // chai 的输出目录是「拆分」，xie 读取前序卷的拆分作为背景
-  const priorSubdir = cfg.inputSubdir === '拆分' ? '拆分' : (cfg.priorVolumeSourceSubdir || '拆分');
-  const parts = [];
-  for (let i = 0; i < currentIdx; i++) {
-    const volName = volumeDirs[i];
-    const priorDir = path.join(bookDir, volName, priorSubdir);
-    if (!fssync.existsSync(priorDir)) continue;
-    const files = await walkFiles(priorDir, cfg.recursive, cfg.fileExtensions, priorDir);
-    for (const f of files) {
-      const raw = await fs.readFile(f.inputPath, 'utf8');
-      const content = extractAnswer(raw);
-      parts.push(`===== ${volName}/${f.relativePath} =====\n${content}`);
-    }
-  }
-
-  if (parts.length === 0) return '';
-  return `【前序卷背景摘要】\n以下是前序卷的拆分提纲，作为当前卷创作的背景参考，请保持人物、伏笔、设定的连续性：\n\n${parts.join('\n\n')}\n\n`;
+  const result = await collectPriorVolumeContext({
+    bookDir: path.join(cfg.inputDir, bookName),
+    currentVolume,
+    inputSubdir: cfg.inputSubdir === '拆分' ? '拆分' : (cfg.priorVolumeSourceSubdir || '拆分'),
+    extensions: cfg.fileExtensions,
+    recursive: cfg.recursive,
+    summaryFileName: cfg.priorVolumeSummaryFile,
+    maxChars: cfg.priorVolumeContextMaxChars,
+    fallbackCharsPerVolume: cfg.priorVolumeFallbackCharsPerVolume,
+    extractContent: extractAnswer,
+  });
+  priorContextCache.set(cacheKey, result);
+  return result;
 }
 
 function renderPrompt(template, task, content, priorVolumes = '') {
@@ -1112,19 +1029,73 @@ async function sendOrEdit(page, cfg, task, prompt, method) {
   return waitForReply(page, beforeTexts, cfg);
 }
 
-async function processTask(page, cfg, state, task, taskState) {
-  const content = await readTaskContent(cfg, task);
-  // 前卷摘要注入：xie 处理某卷时，读取同书前序卷的拆分作为背景
-  const priorVolumes = await collectPriorVolumes(cfg, task);
-  const basePrompt = renderPrompt(cfg.promptTemplate, task, content, priorVolumes);
-  const useEditFirst =
-    cfg.retryMode === 'edit-and-resend' &&
-    taskState.status === 'failed' &&
-    taskState.sent === true &&
-    taskState.conversationUrl;
+function taskLogFields(task, extra = {}) {
+  return {
+    taskId: task.id,
+    book: task.novelName,
+    volume: task.volumeName || '',
+    inputFiles: task.inputFiles.map((item) => item.relativePath),
+    outputFile: path.relative(process.cwd(), task.outputPath),
+    ...extra,
+  };
+}
 
-  await ensureNovelConversation(page, cfg, state, task, taskState, useEditFirst);
+async function markTaskFailed(page, cfg, state, task, taskState, error, phase, extra = {}) {
+  const kind = classifyQueueError(error);
+  const message = error instanceof Error ? error.message : String(error);
+  const currentUrl = page?.url?.() || taskState.conversationUrl || '';
+  taskState.status = 'failed';
+  taskState.lastError = message;
+  taskState.updatedAt = nowIso();
+  if (currentUrl && taskState.sent) taskState.conversationUrl = currentUrl;
+  state.currentTaskId = task.id;
+  state.currentNovelKey = task.novelKey;
+  if (currentUrl && taskState.sent) {
+    state.currentConversationUrl = currentUrl;
+    state.novelConversations[task.novelKey] = currentUrl;
+  }
   await saveState(cfg, state);
+  await logEvent(cfg, 'task_failed', taskLogFields(task, {
+    phase,
+    errorKind: kind,
+    error: message,
+    conversationUrl: currentUrl,
+    ...extra,
+  }));
+  return { kind, message };
+}
+
+async function processTask(page, cfg, state, task, taskState) {
+  let content;
+  let priorVolumes;
+  let basePrompt;
+  try {
+    content = await readTaskContent(cfg, task);
+    priorVolumes = await collectPriorVolumes(cfg, task);
+    basePrompt = renderPrompt(cfg.promptTemplate, task, content, priorVolumes.text);
+    if (basePrompt.length > cfg.maxPromptChars) {
+      throw new QueueError(
+        `提示词 ${basePrompt.length} 字符，超过 maxPromptChars=${cfg.maxPromptChars}；请缩短当前章节或卷摘要`,
+        'prompt_too_large',
+      );
+    }
+
+    const useEditFirst =
+      cfg.retryMode === 'edit-and-resend' &&
+      taskState.status === 'failed' &&
+      taskState.sent === true &&
+      taskState.conversationUrl;
+    await ensureNovelConversation(page, cfg, state, task, taskState, useEditFirst);
+    await saveState(cfg, state);
+  } catch (error) {
+    const failed = await markTaskFailed(page, cfg, state, task, taskState, error, 'prepare', {
+      contentChars: content?.length || 0,
+      priorContextChars: priorVolumes?.charCount || 0,
+      promptChars: basePrompt?.length || 0,
+    });
+    await atomicWrite(`${task.outputPath}.error.txt`, `${failed.message}\n`);
+    throw error;
+  }
 
   // 三类重试各自独立计数，不互相挤占额度：
   //   rateLimitRetries — 额度限制，等待后 edit-and-resend 重发同一条
@@ -1151,14 +1122,32 @@ async function processTask(page, cfg, state, task, taskState) {
       prompt = cfg.safetyPrefix.repeat(safetyPrefixCount) + basePrompt;
     }
 
+    const attemptStartedAt = Date.now();
     try {
+      if (prompt.length > cfg.maxPromptChars) {
+        throw new QueueError(
+          `重试提示词 ${prompt.length} 字符，超过 maxPromptChars=${cfg.maxPromptChars}`,
+          'prompt_too_large',
+        );
+      }
       taskState.status = 'running';
       taskState.currentAttempt = normalRetries + 1;
       taskState.sent = method === 'edit-and-resend' ? taskState.sent : true;
       taskState.conversationUrl = state.currentConversationUrl || page.url();
       taskState.updatedAt = nowIso();
       await saveState(cfg, state);
-      await appendLog(cfg, `TASK ${task.id} method=${method} rateRetry=${rateLimitRetries} safetyRetry=${safetyRetries} normalRetry=${normalRetries}`);
+      await logEvent(cfg, 'task_attempt_started', taskLogFields(task, {
+        method,
+        attempt: normalRetries + 1,
+        rateLimitRetries,
+        safetyRetries,
+        normalRetries,
+        contentChars: content.length,
+        priorContextChars: priorVolumes.charCount,
+        priorContextTruncated: priorVolumes.truncated,
+        promptChars: prompt.length,
+        conversationUrl: taskState.conversationUrl,
+      }));
 
       const reply = await sendOrEdit(page, cfg, task, prompt, method);
 
@@ -1178,24 +1167,25 @@ async function processTask(page, cfg, state, task, taskState) {
       taskState.doneAt = nowIso();
       taskState.updatedAt = nowIso();
       await saveState(cfg, state);
-      await appendLog(cfg, `TASK ${task.id} done output=${task.outputPath}`);
+      await logEvent(cfg, 'task_done', taskLogFields(task, {
+        method,
+        durationMs: Date.now() - attemptStartedAt,
+        replyChars: reply.length,
+        promptChars: prompt.length,
+        priorContextChars: priorVolumes.charCount,
+        conversationUrl: page.url(),
+      }));
       return reply.length;
-    } catch (err) {
-      const kind = err instanceof QueueError ? err.kind : 'unknown';
-      lastError = err instanceof Error ? err.message : String(err);
-
-      // 记录失败状态（所有错误类型共用）
-      taskState.status = 'failed';
-      taskState.lastError = lastError;
-      taskState.sent = true;
-      taskState.conversationUrl = page.url();
-      taskState.updatedAt = nowIso();
-      state.currentTaskId = task.id;
-      state.currentNovelKey = task.novelKey;
-      state.currentConversationUrl = page.url();
-      state.novelConversations[task.novelKey] = page.url();
-      await saveState(cfg, state);
-      await appendLog(cfg, `TASK ${task.id} failed kind=${kind} error=${lastError}`);
+    } catch (error) {
+      const failed = await markTaskFailed(page, cfg, state, task, taskState, error, 'attempt', {
+        method,
+        durationMs: Date.now() - attemptStartedAt,
+        promptChars: prompt.length,
+        contentChars: content.length,
+        priorContextChars: priorVolumes.charCount,
+      });
+      const { kind } = failed;
+      lastError = failed.message;
 
       // 1) 额度限制：等待后 edit-and-resend 重发同一条，不跳到后面
       if (kind === 'rate_limit' && rateLimitRetries < Number(cfg.rateLimitMaxAttempts || 3)) {
@@ -1204,7 +1194,12 @@ async function processTask(page, cfg, state, task, taskState) {
         const waitMin = Math.round(waitMs / 60000);
         taskState.recoveryLog.push({ time: nowIso(), kind: 'rate_limit', action: `wait_${waitMin}min`, retry: rateLimitRetries });
         await saveState(cfg, state);
-        await appendLog(cfg, `TASK ${task.id} rate_limit retry=${rateLimitRetries}/${cfg.rateLimitMaxAttempts} waiting ${waitMin}min`);
+        await logEvent(cfg, 'task_retry_scheduled', taskLogFields(task, {
+          errorKind: kind,
+          retry: rateLimitRetries,
+          maxRetries: cfg.rateLimitMaxAttempts,
+          waitMs,
+        }));
         console.log(`  额度限制，等待 ${waitMin} 分钟后重发第 ${rateLimitRetries} 次...`);
         await page.waitForTimeout(waitMs);
         continue;
@@ -1216,17 +1211,27 @@ async function processTask(page, cfg, state, task, taskState) {
         safetyPrefixCount++;
         taskState.recoveryLog.push({ time: nowIso(), kind: 'safety', action: `add_safety_prefix x${safetyPrefixCount}`, retry: safetyRetries });
         await saveState(cfg, state);
-        await appendLog(cfg, `TASK ${task.id} safety retry=${safetyRetries}/${cfg.safetyMaxAttempts} prefixCount=${safetyPrefixCount}`);
+        await logEvent(cfg, 'task_retry_scheduled', taskLogFields(task, {
+          errorKind: kind,
+          retry: safetyRetries,
+          maxRetries: cfg.safetyMaxAttempts,
+          safetyPrefixCount,
+        }));
         console.log(`  安全拦截，加安全声明前缀后重发第 ${safetyRetries} 次...`);
         continue;
       }
 
       // 3) 其他错误：走原有 maxRetries 逻辑
+      if (kind === 'prompt_too_large' || kind === 'login' || kind === 'page_structure') {
+        await atomicWrite(`${task.outputPath}.error.txt`, `${lastError}\n`);
+        throw error;
+      }
+
       normalRetries++;
       taskState.recoveryLog.push({ time: nowIso(), kind, action: 'normal_retry', retry: normalRetries });
       if (normalRetries >= normalMaxAttempts) {
         await atomicWrite(`${task.outputPath}.error.txt`, `${lastError}\n`);
-        throw new Error(lastError);
+        throw error;
       }
 
       await page.waitForTimeout(Math.max(1000, Number(cfg.betweenItemsMs || 0)));
@@ -1282,7 +1287,7 @@ async function main() {
 
     const tasks = await buildTasks(cfg, opts);
     const state = await loadState(cfg, opts);
-    mergeStateTasks(cfg, state, tasks, opts);
+    mergeStateTasks(cfg, state, tasks, opts, { exists: fssync.existsSync, now: nowIso });
 
     // A plain dry run is a read-only preview. --reset-state remains an explicit mutation.
     if (!opts.dryRun || opts.resetState) await saveState(cfg, state);
@@ -1292,9 +1297,17 @@ async function main() {
       return;
     }
 
-    const nextTask = firstRunnableTask(cfg, state, tasks, opts);
+    await logEvent(cfg, 'run_started', {
+      taskCount: tasks.length,
+      force: opts.force,
+      limit: opts.limit,
+      volumeMode: cfg.volumeMode,
+    });
+
+    const nextTask = firstRunnableTask(cfg, state, tasks, opts, { exists: fssync.existsSync });
     if (!nextTask) {
       console.log('No pending tasks.');
+      await logEvent(cfg, 'run_completed', { success: 0, failed: 0, remaining: 0 });
       return;
     }
 
@@ -1358,6 +1371,7 @@ async function main() {
       return item?.status !== 'done';
     }).length;
     console.log(`\nDone: success ${ok}, failed ${failed}, remaining ${remaining}`);
+    await logEvent(cfg, 'run_completed', { success: ok, failed, remaining, processed });
   } finally {
     await releaseQueueLock(queueLockHandle);
     queueLockHandle = null;

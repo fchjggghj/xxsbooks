@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>小说队列控制台</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">XXSBooks · 本机控制</p>
+        <h1>小说队列控制台</h1>
+        <p class="subtitle">查看拆文与正文进度，在浏览器里安全地启动、继续、停止、修复状态，管理书籍与配置。</p>
+      </div>
+      <div class="topbar-actions">
+        <span id="connection-badge" class="badge badge-waiting" role="status">正在连接</span>
+        <button id="refresh-status" class="button button-secondary" type="button">刷新状态</button>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="功能分区">
+      <button class="tab tab-active" role="tab" aria-selected="true" data-tab="overview">概览</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="control">队列控制</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="books">书籍管理</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="config">配置</button>
+    </nav>
+
+    <main>
+      <!-- Tab 1: 概览 -->
+      <section id="tab-overview" class="tab-panel tab-panel-active" role="tabpanel" aria-label="概览">
+        <section class="status-grid" aria-label="队列概览">
+          <article class="card summary-card">
+            <div class="card-heading">
+              <div>
+                <p class="card-kicker">队列</p>
+                <h2>运行状态</h2>
+              </div>
+              <span id="queue-state" class="status-pill status-neutral">读取中</span>
+            </div>
+            <dl class="compact-list">
+              <div><dt>进程</dt><dd id="queue-process">—</dd></div>
+              <div><dt>锁</dt><dd id="queue-lock">—</dd></div>
+              <div><dt>最后检查</dt><dd id="checked-at">—</dd></div>
+            </dl>
+          </article>
+
+          <article class="card summary-card">
+            <div class="card-heading">
+              <div>
+                <p class="card-kicker">浏览器连接</p>
+                <h2>Chrome / CDP</h2>
+              </div>
+              <span id="cdp-state" class="status-pill status-neutral">读取中</span>
+            </div>
+            <p id="cdp-url" class="muted break-all">—</p>
+            <p class="hint">启动任务前，Chrome 调试连接与 ChatGPT 登录态都需要可用。</p>
+          </article>
+
+          <article id="stage-chai" class="card stage-card">
+            <div class="card-heading">
+              <div>
+                <p class="card-kicker">阶段一 · chai</p>
+                <h2>拆文</h2>
+              </div>
+              <span class="status-pill status-neutral" data-field="state">读取中</span>
+            </div>
+            <div class="progress-row">
+              <progress class="progress-track" data-field="progress" aria-label="拆文进度" max="100" value="0">0%</progress>
+              <strong data-field="progress-text">0 / 0</strong>
+            </div>
+            <dl class="metrics">
+              <div><dt>完成</dt><dd data-field="done">0</dd></div>
+              <div><dt>待处理</dt><dd data-field="pending">0</dd></div>
+              <div><dt>运行中</dt><dd data-field="running">0</dd></div>
+              <div><dt>失败</dt><dd data-field="failed">0</dd></div>
+            </dl>
+            <p class="detail-line"><span>当前任务</span><strong data-field="current">—</strong></p>
+            <p class="stage-error" data-field="error" hidden></p>
+          </article>
+
+          <article id="stage-xie" class="card stage-card">
+            <div class="card-heading">
+              <div>
+                <p class="card-kicker">阶段二 · xie</p>
+                <h2>正文</h2>
+              </div>
+              <span class="status-pill status-neutral" data-field="state">读取中</span>
+            </div>
+            <div class="progress-row">
+              <progress class="progress-track" data-field="progress" aria-label="正文进度" max="100" value="0">0%</progress>
+              <strong data-field="progress-text">0 / 0</strong>
+            </div>
+            <dl class="metrics">
+              <div><dt>完成</dt><dd data-field="done">0</dd></div>
+              <div><dt>待处理</dt><dd data-field="pending">0</dd></div>
+              <div><dt>运行中</dt><dd data-field="running">0</dd></div>
+              <div><dt>失败</dt><dd data-field="failed">0</dd></div>
+            </dl>
+            <p class="detail-line"><span>当前任务</span><strong data-field="current">—</strong></p>
+            <p class="stage-error" data-field="error" hidden></p>
+          </article>
+        </section>
+
+        <section class="workspace-grid">
+          <article class="card preflight-card">
+            <div class="section-heading">
+              <div>
+                <p class="card-kicker">运行前检查</p>
+                <h2>预检</h2>
+              </div>
+              <button id="run-preflight" class="button button-secondary" type="button">立即预检</button>
+            </div>
+            <p id="preflight-summary" class="muted">尚未执行预检。</p>
+            <ul id="preflight-list" class="check-list" aria-live="polite"></ul>
+          </article>
+
+          <article class="card logs-card">
+            <div class="section-heading logs-heading">
+              <div>
+                <p class="card-kicker">诊断</p>
+                <h2>最近日志</h2>
+              </div>
+              <div class="logs-controls">
+                <label for="log-stage">阶段</label>
+                <select id="log-stage">
+                  <option value="chai">拆文（chai）</option>
+                  <option value="xie">正文（xie）</option>
+                </select>
+                <button id="refresh-logs" class="button button-secondary" type="button">刷新日志</button>
+              </div>
+            </div>
+            <p id="log-meta" class="muted">请选择阶段并刷新。</p>
+            <pre id="log-output" tabindex="0">暂无日志。</pre>
+          </article>
+        </section>
+      </section>
+
+      <!-- Tab 2: 队列控制 -->
+      <section id="tab-control" class="tab-panel" role="tabpanel" aria-label="队列控制" hidden>
+        <section class="workspace-grid">
+          <article class="card control-card">
+            <div class="section-heading">
+              <div>
+                <p class="card-kicker">操作</p>
+                <h2>控制队列</h2>
+              </div>
+              <span id="action-state" class="muted" role="status">等待操作</span>
+            </div>
+
+            <fieldset class="stage-picker">
+              <legend>先选择要操作的阶段</legend>
+              <label>
+                <input type="radio" name="action-stage" value="chai">
+                <span><strong>拆文</strong><small>chai</small></span>
+              </label>
+              <label>
+                <input type="radio" name="action-stage" value="xie">
+                <span><strong>正文</strong><small>xie</small></span>
+              </label>
+            </fieldset>
+
+            <div class="advanced-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="action-force">
+                <span>强制重做（--force，仅 start）</span>
+              </label>
+              <label class="number-label" for="action-limit">
+                <span>本次处理上限</span>
+                <input type="number" id="action-limit" min="1" step="1" placeholder="不限">
+              </label>
+            </div>
+
+            <div class="button-row">
+              <button id="action-start" class="button button-primary" type="button">开始所选阶段</button>
+              <button id="action-resume" class="button button-secondary" type="button">继续所选阶段</button>
+              <button id="action-stop" class="button button-danger" type="button">停止当前队列</button>
+            </div>
+            <p class="hint">“开始”建立或继续可运行任务；“继续”要求该阶段已有状态。正文只有在拆文全部完成后才能启动。--force 会重做已存在输出。</p>
+          </article>
+
+          <article class="card chrome-card">
+            <div class="section-heading">
+              <div>
+                <p class="card-kicker">环境</p>
+                <h2>启动 Chrome</h2>
+              </div>
+            </div>
+            <p class="muted">点击下方按钮启动带 CDP 调试端口的 Chrome，并自动打开 ChatGPT。</p>
+            <ul class="key-list">
+              <li><span>CDP</span><code>http://127.0.0.1:9222</code></li>
+              <li><span>Profile</span><code>C:\chrome-automation</code></li>
+            </ul>
+            <button id="launch-chrome" class="button button-primary" type="button">启动 Chrome</button>
+            <p class="hint">首次启动后请在 Chrome 里登录 ChatGPT，之后保留 Profile 即可复用登录态。</p>
+          </article>
+        </section>
+
+        <section class="workspace-grid">
+          <article class="card reconcile-card">
+            <div class="section-heading">
+              <div>
+                <p class="card-kicker">状态修复</p>
+                <h2>Reconcile</h2>
+              </div>
+              <span id="reconcile-state" class="muted" role="status">空闲</span>
+            </div>
+            <p class="muted">对照状态文件与磁盘实际输出，自动标记漏标的 done、补回缺输出的任务、清掉 stuck running 指针。</p>
+
+            <fieldset class="stage-picker">
+              <legend>选择阶段</legend>
+              <label>
+                <input type="radio" name="reconcile-stage" value="all" checked>
+                <span><strong>全部</strong><small>all</small></span>
+              </label>
+              <label>
+                <input type="radio" name="reconcile-stage" value="chai">
+                <span><strong>拆文</strong><small>chai</small></span>
+              </label>
+              <label>
+                <input type="radio" name="reconcile-stage" value="xie">
+                <span><strong>正文</strong><small>xie</small></span>
+              </label>
+            </fieldset>
+
+            <div class="button-row">
+              <button id="reconcile-preview" class="button button-secondary" type="button">预览差异</button>
+              <button id="reconcile-apply" class="button button-danger" type="button">应用修复</button>
+            </div>
+            <pre id="reconcile-output" class="output-box" tabindex="0">尚未执行。</pre>
+          </article>
+
+          <article class="card progress-card">
+            <div class="section-heading">
+              <div>
+                <p class="card-kicker">进度文件</p>
+                <h2>生成 进度.md</h2>
+              </div>
+              <span id="progress-state" class="muted" role="status">空闲</span>
+            </div>
+            <p class="muted">为每本书/卷目录生成 进度.md，资源管理器里打开即可看到当前拆文/正文进度。</p>
+            <button id="generate-progress" class="button button-primary" type="button">立即生成</button>
+            <pre id="progress-output" class="output-box" tabindex="0">尚未生成。</pre>
+          </article>
+        </section>
+      </section>
+
+      <!-- Tab 3: 书籍管理 -->
+      <section id="tab-books" class="tab-panel" role="tabpanel" aria-label="书籍管理" hidden>
+        <article class="card books-list-card">
+          <div class="section-heading">
+            <div>
+              <p class="card-kicker">书籍目录</p>
+              <h2>书籍列表</h2>
+            </div>
+            <div class="logs-controls">
+              <button id="refresh-books" class="button button-secondary" type="button">刷新列表</button>
+            </div>
+          </div>
+          <p id="books-meta" class="muted">尚未加载。</p>
+          <div id="books-list" class="books-list" aria-live="polite"></div>
+        </article>
+
+        <section class="workspace-grid">
+          <article class="card normalize-card">
+            <div class="section-heading">
+              <div>
+                <p class="card-kicker">编号补零</p>
+                <h2>Normalize</h2>
+              </div>
+              <span id="normalize-state" class="muted" role="status">空闲</span>
+            </div>
+            <p class="muted">把任意文件名重命名为 0001.txt / 0002.txt ...，保证章节顺序稳定。</p>
+            <div class="form-row">
+              <label for="normalize-book">书名</label>
+              <input type="text" id="normalize-book" placeholder="例如 测试书">
+            </div>
+            <div class="form-row">
+              <label for="normalize-volume">卷名（卷模式必填）</label>
+              <input type="text" id="normalize-volume" placeholder="例如 第一卷">
+            </div>
+            <div class="button-row">
+              <button id="normalize-preview" class="button button-secondary" type="button">预览改名</button>
+              <button id="normalize-apply" class="button button-danger" type="button">执行改名</button>
+            </div>
+            <pre id="normalize-output" class="output-box" tabindex="0">尚未执行。</pre>
+          </article>
+
+          <article class="card import-card">
+            <div class="section-heading">
+              <div>
+                <p class="card-kicker">导入新书</p>
+                <h2>Import</h2>
+              </div>
+              <span id="import-state" class="muted" role="status">空闲</span>
+            </div>
+            <p class="muted">从外部源目录把每本书复制到 <code>书籍/&lt;书名&gt;/原文/</code>，自动生成安全目录名。</p>
+            <div class="form-row">
+              <label for="import-source">源目录</label>
+              <input type="text" id="import-source" placeholder="例如 D:\新书榜\2026-07">
+            </div>
+            <div class="button-row">
+              <button id="import-preview" class="button button-secondary" type="button">预览导入</button>
+              <button id="import-apply" class="button button-danger" type="button">执行导入</button>
+            </div>
+            <pre id="import-output" class="output-box" tabindex="0">尚未执行。</pre>
+          </article>
+        </section>
+
+        <article class="card preview-vol-card">
+          <div class="section-heading">
+            <div>
+              <p class="card-kicker">分卷预览</p>
+              <h2>Preview Volumes</h2>
+            </div>
+            <span id="preview-vol-state" class="muted" role="status">空闲</span>
+          </div>
+          <p class="muted">分析源目录每本书的章节文件名，提取世界标题并生成建议分卷方案（<code>reports/分卷预览报告.md</code>）。</p>
+          <div class="form-row">
+            <label for="preview-vol-source">源目录</label>
+            <input type="text" id="preview-vol-source" placeholder="例如 D:\新书榜\2026-07">
+          </div>
+          <button id="preview-vol-run" class="button button-primary" type="button">生成报告</button>
+          <pre id="preview-vol-output" class="output-box" tabindex="0">尚未执行。</pre>
+        </article>
+      </section>
+
+      <!-- Tab 4: 配置 -->
+      <section id="tab-config" class="tab-panel" role="tabpanel" aria-label="配置" hidden>
+        <article class="card config-card">
+          <div class="section-heading">
+            <div>
+              <p class="card-kicker">阶段配置</p>
+              <h2>编辑 config-chai.json / config-xie.json</h2>
+            </div>
+            <div class="logs-controls">
+              <label for="config-stage">阶段</label>
+              <select id="config-stage">
+                <option value="chai">拆文（chai）</option>
+                <option value="xie">正文（xie）</option>
+              </select>
+              <button id="load-config" class="button button-secondary" type="button">加载</button>
+              <button id="save-config" class="button button-primary" type="button">保存</button>
+            </div>
+          </div>
+          <p id="config-meta" class="muted">选择阶段后点击“加载”。</p>
+          <p class="hint">修改 <code>gptUrl</code>、<code>promptTemplate</code>、<code>volumeMode</code>、<code>priorVolumeContext</code> 等字段后保存。流水线目录约束（chai 输出 = xie 输入 = 拆分，xie 输出 = 正文）会被强制校验。</p>
+          <textarea id="config-editor" class="config-editor" spellcheck="false" autocomplete="off" placeholder="{}"></textarea>
+          <p id="config-error" class="stage-error" hidden></p>
+        </article>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <noscript>此面板需要启用 JavaScript。</noscript>
+  </body>
+</html>
