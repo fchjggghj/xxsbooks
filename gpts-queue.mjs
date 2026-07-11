@@ -201,6 +201,7 @@ function parseArgs(argv) {
     dryRun: false,
     force: false,
     limit: 0,
+    perNovelLimit: 0,
     resetState: false,
   };
 
@@ -211,6 +212,11 @@ function parseArgs(argv) {
     else if (arg === '--reset-state') out.resetState = true;
     else if (arg === '--config') out.configPath = argv[++i] || out.configPath;
     else if (arg === '--limit') out.limit = Number(argv[++i] || 0);
+    else if (arg === '--per-novel-limit') {
+      const value = Number(argv[++i] || 0);
+      if (!Number.isInteger(value) || value < 0) throw new Error('--per-novel-limit must be a non-negative integer.');
+      out.perNovelLimit = value;
+    }
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -1243,6 +1249,21 @@ function displayPath(projectRoot, file) {
   return path.relative(projectRoot, file) || '.';
 }
 
+// 按 novelKey 限流：每个 novelKey 最多保留 perNovelLimit 个任务。
+// perNovelLimit<=0 表示不限流。用于实现"每本书只处理前 N 章"的跨书轮询。
+function filterByPerNovelLimit(tasks, perNovelLimit) {
+  if (!perNovelLimit || perNovelLimit <= 0) return tasks;
+  const counts = new Map();
+  const result = [];
+  for (const task of tasks) {
+    const c = counts.get(task.novelKey) || 0;
+    if (c >= perNovelLimit) continue;
+    counts.set(task.novelKey, c + 1);
+    result.push(task);
+  }
+  return result;
+}
+
 async function printDryRun(projectRoot, cfg, state, tasks, opts) {
   console.log(`Config: ${displayPath(projectRoot, cfg.configPath)}`);
   console.log(`Input: ${cfg.inputDir}`);
@@ -1251,16 +1272,21 @@ async function printDryRun(projectRoot, cfg, state, tasks, opts) {
   console.log(`conversationScope: ${cfg.conversationScope}`);
   console.log(`retryMode: ${cfg.retryMode}`);
   console.log(`State: ${displayPath(projectRoot, cfg.stateFile)}`);
+  if (opts.perNovelLimit > 0) console.log(`perNovelLimit: ${opts.perNovelLimit}`);
 
   const novelCount = new Set(tasks.map((task) => task.novelKey)).size;
   console.log(`Novels: ${novelCount}`);
 
-  const pending = tasks.filter((task) => {
+  const allPending = tasks.filter((task) => {
     const item = state.tasks[taskStateKey(task)];
     return opts.force || !(cfg.skipExisting && fssync.existsSync(task.outputPath)) || item?.status === 'failed';
   });
+  const pending = filterByPerNovelLimit(allPending, opts.perNovelLimit);
 
-  console.log(`Pending tasks: ${pending.length}`);
+  const limitNote = opts.perNovelLimit > 0
+    ? ` (per-novel-limit=${opts.perNovelLimit}, 全部 pending ${allPending.length})`
+    : '';
+  console.log(`Pending tasks: ${pending.length}${limitNote}`);
   for (const task of pending) {
     const item = state.tasks[taskStateKey(task)] || {};
     const status = item.status || 'pending';
@@ -1301,6 +1327,7 @@ async function main() {
       taskCount: tasks.length,
       force: opts.force,
       limit: opts.limit,
+      perNovelLimit: opts.perNovelLimit,
       volumeMode: cfg.volumeMode,
     });
 
@@ -1319,6 +1346,8 @@ async function main() {
     let ok = 0;
     let failed = 0;
     let processed = 0;
+    // 每个 novelKey 本次运行已处理的 pending 任务数（用于 --per-novel-limit）。
+    const perNovelProcessed = new Map();
 
     try {
       for (const task of tasks) {
@@ -1328,6 +1357,13 @@ async function main() {
         if (!opts.force && cfg.skipExisting && outputExists) continue;
         if (item.status === 'done' && !opts.force) continue;
 
+        // --per-novel-limit 限制单个 novelKey 本次运行处理的 pending 任务数。
+        // 已 done/skip 的任务不计入；超出配额的 novelKey 的后续章节直接跳过。
+        if (opts.perNovelLimit > 0) {
+          const npc = perNovelProcessed.get(task.novelKey) || 0;
+          if (npc >= opts.perNovelLimit) continue;
+        }
+
         // --limit bounds the number of pending tasks processed in a single run,
         // not the size of the task list. Stop before starting a task that would
         // exceed the budget so currentTaskId stays clean.
@@ -1336,6 +1372,9 @@ async function main() {
           break;
         }
         processed++;
+        if (opts.perNovelLimit > 0) {
+          perNovelProcessed.set(task.novelKey, (perNovelProcessed.get(task.novelKey) || 0) + 1);
+        }
 
         state.currentTaskId = task.id;
         state.currentNovelKey = task.novelKey;

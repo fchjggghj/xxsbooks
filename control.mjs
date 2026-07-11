@@ -28,8 +28,8 @@ function usage() {
 
 Usage:
   node control.mjs status [chai|xie|all] [--json]
-  node control.mjs start <chai|xie> [--limit N] [--force] [--json]
-  node control.mjs resume <chai|xie> [--limit N] [--json]
+  node control.mjs start <chai|xie> [--limit N] [--per-novel-limit N] [--force] [--json]
+  node control.mjs resume <chai|xie> [--limit N] [--per-novel-limit N] [--json]
   node control.mjs stop [--json]
   node control.mjs reconcile <chai|xie|all> [--apply] [--json]
   node control.mjs preflight [--json]
@@ -37,6 +37,8 @@ Usage:
   node control.mjs normalize <书名> [卷名] [--apply] [--json]
 
 status and reconcile without --apply are read-only. start/resume run in the background.
+--limit N: 本次运行最多处理 N 个 pending 任务（全局顺序截断）。
+--per-novel-limit N: 每个 novelKey 本次最多处理 N 个 pending 任务（跨书轮询，可让多本书各处理前 N 章）。
 preflight: 跑前预检（Chrome/CDP/登录态/输入文件齐全/编号连续）。
 progress: 显式生成每本书的进度.md（写操作）。
 normalize: 预览补零重命名；只有 --apply 才写入。`;
@@ -44,7 +46,7 @@ normalize: 预览补零重命名；只有 --apply 才写入。`;
 
 function parseArgs(argv) {
   const positional = [];
-  const options = { json: false, apply: false, force: false, limit: null };
+  const options = { json: false, apply: false, force: false, limit: null, perNovelLimit: null };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--json') options.json = true;
@@ -54,6 +56,10 @@ function parseArgs(argv) {
       const value = Number(argv[++i]);
       if (!Number.isInteger(value) || value <= 0) throw new Error('--limit must be a positive integer.');
       options.limit = value;
+    } else if (arg === '--per-novel-limit') {
+      const value = Number(argv[++i]);
+      if (!Number.isInteger(value) || value < 0) throw new Error('--per-novel-limit must be a non-negative integer.');
+      options.perNovelLimit = value;
     } else if (arg === '--help' || arg === '-h') options.help = true;
     else if (arg.startsWith('--')) throw new Error(`Unknown option: ${arg}`);
     else positional.push(arg);
@@ -249,12 +255,13 @@ async function launch(command, stage, options) {
   await fs.mkdir(path.dirname(logPath), { recursive: true });
   await fs.appendFile(
     logPath,
-    `\n${new Date().toISOString()} CONTROL ${command} stage=${stage} limit=${options.limit || ''} force=${options.force}\n`,
+    `\n${new Date().toISOString()} CONTROL ${command} stage=${stage} limit=${options.limit || ''} perNovelLimit=${options.perNovelLimit ?? ''} force=${options.force}\n`,
     'utf8',
   );
   const logFd = fssync.openSync(logPath, 'a');
   const args = ['gpts-queue.mjs', '--config', STAGES[stage]];
   if (options.limit) args.push('--limit', String(options.limit));
+  if (options.perNovelLimit != null) args.push('--per-novel-limit', String(options.perNovelLimit));
   if (options.force) args.push('--force');
 
   const child = spawn(process.execPath, args, {
