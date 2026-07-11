@@ -221,8 +221,17 @@ function ensureIdle(status) {
 
 function ensureXieAllowed(status) {
   const chai = status.stages.chai;
-  if (!chai?.complete) {
-    throw new Error('Cannot start xie until chai is complete and all chai outputs exist.');
+  if (!chai) {
+    throw new Error('Cannot start xie: chai stage state not found.');
+  }
+  // 约束本意：xie 处理某章前该章的 chai 拆分必须已完成。
+  // 全量完成（chai.complete）直接放行；部分推进时要求 chai 无运行中任务且已有可改编素材，
+  // 避免 chai/xie 同时操作同一本书产生竞态。xie 处理具体章节时若对应拆分文件不存在会在队列中报错。
+  if (chai.counts.running > 0) {
+    throw new Error(`Cannot start xie while chai is running (${chai.counts.running} task(s) in progress).`);
+  }
+  if (chai.counts.done === 0) {
+    throw new Error('Cannot start xie: no chai outputs available yet.');
   }
 }
 
