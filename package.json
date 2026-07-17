@@ -28,7 +28,8 @@
     "xie:dry": "node gpts-queue.mjs --config config-xie.json --dry-run",
     "xie:force": "node gpts-queue.mjs --config config-xie.json --force",
     "xie:reset": "node gpts-queue.mjs --config config-xie.json --reset-state --dry-run",
-    "check": "node --check gpts-queue.mjs && node --check queue-lock.mjs && node --check control.mjs"
+    "check": "node --check gpts-queue.mjs && node --check queue-lock.mjs && node --check control.mjs && node --check lib/queue-state.mjs",
+    "test": "node --test test/queue-state.test.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.49.0"

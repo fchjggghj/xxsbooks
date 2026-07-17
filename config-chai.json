@@ -6,13 +6,30 @@
   "inputSubdir": "原文",
   "outputSubdir": "拆分",
   "volumeMode": false,
-  "fileExtensions": [".txt", ".md"],
+  "fileExtensions": [
+    ".txt",
+    ".md"
+  ],
   "recursive": true,
   "skipExisting": true,
   "outputExtension": ".md",
   "maxPromptChars": 120000,
   "promptTemplate": "【严格按照提示词执行，注意上下文】\n\n{{content}}",
   "chaptersPerPrompt": 1,
+  "chapterRange": {
+    "start": 1,
+    "end": 60
+  },
+  "skipNovelKeys": [
+    "反派只想学习［快穿］",
+    "快穿_偏执反派在我怀里奶唧唧"
+  ],
+  "restartNovelKeys": [
+    "快穿：系统和宿主一起黑化了"
+  ],
+  "freshConversationNovelKeys": [
+    "快穿：系统和宿主一起黑化了"
+  ],
   "conversationScope": "novel",
   "retryMode": "edit-and-resend",
   "maxRetries": 1,

@@ -10,6 +10,7 @@ import { classifyQueueError, safeAppendJsonlLog } from './lib/structured-log.mjs
 import { collectPriorVolumeContext } from './lib/prior-context.mjs';
 
 let queueLockHandle = null;
+let queuePage = null;
 let signalExitStarted = false;
 const runId = randomUUID();
 const priorContextCache = new Map();
@@ -19,6 +20,8 @@ async function releaseLockAndExit(signal) {
   signalExitStarted = true;
   const exitCode = signal === 'SIGINT' ? 130 : 143;
   try {
+    if (queuePage && !queuePage.isClosed()) await queuePage.close().catch(() => {});
+    queuePage = null;
     await releaseQueueLock(queueLockHandle);
     queueLockHandle = null;
   } catch (err) {
@@ -79,16 +82,26 @@ const DEFAULT_CONFIG = {
   safetyPrefix: '【声明：以下故事内容纯属虚构，仅用于文学创作与教育示范目的，旨在帮助学生理解相关主题、提升写作与思辨能力，不构成任何真实行为指引或倡导。】\n\n',
   safetyMaxAttempts: 5,
   includeFileHeaders: false,
+  // 章节范围过滤：只处理文件名序号在 [start, end] 范围内的章节。
+  // 例: { "start": 51, "end": 100 } 只拆第 51-100 章；{ "start": 51 } 拆第 51 章到末尾。
+  // null 或不设置 = 处理全部章节。配合 state.json + skipExisting 可实现"接着上次拆"。
+  chapterRange: null,
+  // 完全跳过的书籍键。用于保留已完成书籍，仅处理后续指定书籍。
+  skipNovelKeys: [],
+  // 指定书籍仅从头重启一次；完成章节会清除重启标记，后续恢复不会重复发送。
+  restartNovelKeys: [],
+  // 指定书籍仅新建一次会话；适用于旧会话地址已失效或需要从零建立上下文的重启。
+  freshConversationNovelKeys: [],
   stateFile: '',
   logFile: '',
 };
 
 const COMPOSER_SELECTORS = [
-  '#prompt-textarea',
-  '[data-testid="prompt-textarea"]',
+  'div#prompt-textarea[contenteditable="true"][role="textbox"]',
+  '[data-testid="prompt-textarea"][contenteditable="true"]',
   'div[contenteditable="true"][role="textbox"]',
   'div[contenteditable="true"]',
-  'textarea',
+  'textarea:not(.wcDTda_fallbackTextarea)',
 ];
 
 const SEND_BUTTON_SELECTORS = [
@@ -253,7 +266,27 @@ async function loadConfig(configPath, projectRoot) {
   cfg.outputExtension = String(cfg.outputExtension || '.md').startsWith('.')
     ? String(cfg.outputExtension || '.md')
     : `.${cfg.outputExtension}`;
-  cfg.chaptersPerPrompt = Math.max(1, Number(cfg.chaptersPerPrompt || 1));
+  cfg.chaptersPerPrompt = Number(cfg.chaptersPerPrompt ?? 1);
+  if (raw.chapterRange && typeof raw.chapterRange === 'object') {
+    const r = raw.chapterRange;
+    const start = Number(r.start);
+    const end = r.end != null ? Number(r.end) : Infinity;
+    if (Number.isFinite(start) && start > 0 && (end === Infinity || (Number.isFinite(end) && end >= start))) {
+      cfg.chapterRange = {
+        start: Math.floor(start),
+        end: end === Infinity ? Infinity : Math.floor(end),
+      };
+    }
+  }
+  cfg.skipNovelKeys = Array.isArray(raw.skipNovelKeys)
+    ? raw.skipNovelKeys.map((key) => String(key).trim()).filter(Boolean)
+    : [];
+  cfg.restartNovelKeys = Array.isArray(raw.restartNovelKeys)
+    ? raw.restartNovelKeys.map((key) => String(key).trim()).filter(Boolean)
+    : [];
+  cfg.freshConversationNovelKeys = Array.isArray(raw.freshConversationNovelKeys)
+    ? raw.freshConversationNovelKeys.map((key) => String(key).trim()).filter(Boolean)
+    : [];
   cfg.conversationScope = String(cfg.conversationScope || 'novel');
   cfg.maxRetries = Math.max(0, Number(cfg.maxRetries || 0));
   cfg.priorVolumeContextMaxChars = Math.max(0, Number(cfg.priorVolumeContextMaxChars || 0));
@@ -294,6 +327,9 @@ function validateConfig(cfg, dryRun) {
   }
   if (cfg.conversationScope !== 'novel') {
     errors.push('conversationScope must be "novel"');
+  }
+  if (cfg.chaptersPerPrompt !== 1) {
+    errors.push('chaptersPerPrompt must be 1; chai and xie always process one chapter per task');
   }
   if (cfg.priorVolumeContext && !cfg.volumeMode) {
     errors.push('priorVolumeContext 只能在 volumeMode=true 时启用');
@@ -420,6 +456,27 @@ function outputPathForTask(cfg, task) {
   return path.join(...outParts);
 }
 
+// 变更每次处理的章节数时，保留旧任务已完成章节的完成状态，避免把原先的
+// 多章任务拆成单章任务后重复发送。
+function completedInputFiles(state) {
+  return new Set(
+    Object.values(state.tasks || {})
+      .filter((item) => item.status === 'done')
+      .flatMap((item) => Array.isArray(item.inputFiles) ? item.inputFiles : []),
+  );
+}
+
+function preserveCompletedInputs(state, tasks, completedFiles) {
+  for (const task of tasks) {
+    const item = state.tasks[taskStateKey(task)];
+    if (!item || item.status === 'done' || item.restartRequired === true) continue;
+    if (task.inputFiles.length > 0 && task.inputFiles.every((file) => completedFiles.has(file.relativePath))) {
+      item.status = 'done';
+      item.lastError = '';
+    }
+  }
+}
+
 function fileNovelInfo(file) {
   const parts = file.relativePath.split(/[\\/]+/).filter(Boolean);
   if (parts.length > 1) {
@@ -534,6 +591,12 @@ async function scanBookSource(cfg) {
   return files;
 }
 
+function chapterIndexFromFile(filePath) {
+  const base = path.basename(filePath, path.extname(filePath));
+  const m = base.match(/^(\d+)$/);
+  return m ? Number(m[1]) : null;
+}
+
 async function buildTasks(cfg, opts) {
   // 普通 dry-run 必须零写入，目录只在真实运行时创建。
   if (!opts.dryRun) {
@@ -554,8 +617,16 @@ async function buildTasks(cfg, opts) {
 
   const tasks = [];
   for (const novel of novels.values()) {
-    for (let i = 0; i < novel.files.length; i += cfg.chaptersPerPrompt) {
-      const group = novel.files.slice(i, i + cfg.chaptersPerPrompt);
+    if (cfg.skipNovelKeys.includes(novel.novelKey)) continue;
+    if (cfg.chapterRange) {
+      const { start, end } = cfg.chapterRange;
+      novel.files = novel.files.filter((f) => {
+        const idx = chapterIndexFromFile(f.inputPath);
+        return idx !== null && idx >= start && idx <= end;
+      });
+    }
+    for (let i = 0; i < novel.files.length; i++) {
+      const group = [novel.files[i]];
       const localId = taskIdFor(i, group);
       const task = {
         id: `${novel.novelKey}:${localId}`,
@@ -724,6 +795,22 @@ async function openExistingConversation(page, url) {
   await firstComposer(page, 90000);
 }
 
+function canonicalConversationUrl(value) {
+  const url = new URL(value);
+  return `${url.origin}${url.pathname}`.replace(/\/$/, '');
+}
+
+function assertExpectedConversation(page, expectedUrl, novelKey) {
+  const actual = canonicalConversationUrl(page.url());
+  const expected = canonicalConversationUrl(expectedUrl);
+  if (actual !== expected) {
+    throw new QueueError(
+      `Conversation URL mismatch for novel "${novelKey}": expected ${expected}, got ${actual}`,
+      'page_structure',
+    );
+  }
+}
+
 async function ensureNovelConversation(page, cfg, state, task, taskState, useFailedConversation) {
   const failedConversationUrl = useFailedConversation ? taskState.conversationUrl : '';
   const savedNovelUrl = state.novelConversations[task.novelKey] || '';
@@ -744,12 +831,29 @@ async function ensureNovelConversation(page, cfg, state, task, taskState, useFai
     await firstComposer(page, 90000);
   }
 
+  assertExpectedConversation(page, targetUrl, task.novelKey);
+
   state.currentConversationUrl = targetUrl;
   state.currentNovelKey = task.novelKey;
   state.novelConversations[task.novelKey] = targetUrl;
 }
 
 async function setEditableText(page, locator, text) {
+  // Playwright 的 fill 会触发浏览器原生 input 事件，能同步 ChatGPT 当前的
+  // React/ProseMirror 状态；仅用 keyboard.insertText 会出现页面显示为空且无法发送。
+  try {
+    await locator.fill(text);
+    const filled = await locator.evaluate((el) => {
+      const value = el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement
+        ? el.value
+        : (el.textContent || '');
+      return value.length;
+    });
+    if (filled > 0) return;
+  } catch {
+    // 少数旧版 contenteditable 不支持 fill，下面保留键盘输入回退。
+  }
+
   await locator.click();
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
   await page.keyboard.press('Backspace');
@@ -770,6 +874,14 @@ async function setEditableText(page, locator, text) {
       data: null,
     }));
   });
+
+  const filled = await locator.evaluate((el) => {
+    const value = el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement
+      ? el.value
+      : (el.textContent || '');
+    return value.length;
+  });
+  if (filled === 0) throw new QueueError('Failed to write prompt into the ChatGPT composer.', 'page_structure');
 }
 
 async function insertPrompt(page, prompt) {
@@ -778,55 +890,31 @@ async function insertPrompt(page, prompt) {
 }
 
 async function clickSend(page) {
-  // 发送按钮在文本刚插入时可能仍处于 disabled，需要等待框架识别输入并启用按钮。
-  const tryClickButton = async () => {
-    for (const selector of SEND_BUTTON_SELECTORS) {
-      try {
-        const button = page.locator(selector).last();
-        if ((await button.count()) > 0 && (await button.isVisible())) {
-          // 显式等按钮 enabled（最多 8 秒），insertText 后按钮启用有延迟。
-          try {
-            await button.waitFor({ state: 'attached', timeout: 1000 });
-            const enabled = await button.isEnabled();
-            if (enabled) {
-              await button.click();
-              return true;
-            }
-            continue;
-          } catch {
-            continue;
+  // 只以新增用户消息作为提交成功信号。输入框清空可能由页面重绘造成，不能
+  // 证明提示词已进入当前会话。
+  const beforeUserCount = await page.locator(USER_SELECTOR).count();
+  const deadline = Date.now() + 15000;
+  let clicked = false;
+  while (Date.now() < deadline) {
+    if (!clicked) {
+      for (const selector of SEND_BUTTON_SELECTORS) {
+        try {
+          const button = page.locator(selector).last();
+          if ((await button.count()) > 0 && (await button.isVisible()) && (await button.isEnabled())) {
+            await button.click({ timeout: 2000, noWaitAfter: true });
+            clicked = true;
+            break;
           }
+        } catch {
+          // The page may re-render after a successful click; verify below.
         }
-      } catch {
-        // Try the next selector.
       }
     }
-    return false;
-  };
-
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline) {
-    if (await tryClickButton()) {
-      // 点击后等待输入框清空（发送成功的标志），最多等 3 秒。
-      await page.waitForTimeout(500);
-      const cleared = await page.evaluate(() => {
-        const el = document.querySelector('#prompt-textarea') || document.querySelector('div[contenteditable="true"][role="textbox"]');
-        return !el || (el.textContent || '').trim().length === 0;
-      });
-      if (cleared) return;
-      // 输入框未清空，说明发送未生效，继续重试。
-    }
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(250);
+    if ((await page.locator(USER_SELECTOR).count()) > beforeUserCount) return;
   }
 
-  // Fallback：先聚焦输入框再按 Enter。
-  try {
-    const composer = await firstComposer(page, 2000);
-    await composer.click();
-    await page.keyboard.press('Enter');
-  } catch {
-    await page.keyboard.press('Enter');
-  }
+  throw new QueueError('ChatGPT send control did not submit the prompt.', 'page_structure');
 }
 
 async function clickVisible(page, selectors, timeoutMs = 8000) {
@@ -1020,7 +1108,7 @@ function renderPrompt(template, task, content, priorVolumes = '') {
     .replaceAll('{{relativePaths}}', task.inputFiles.map((x) => x.relativePath).join('\n'));
 }
 
-async function sendOrEdit(page, cfg, task, prompt, method) {
+async function sendOrEdit(page, cfg, task, prompt, method, onSubmitted) {
   const beforeTexts = await assistantTexts(page);
   if (method === 'edit-and-resend') {
     const edited = await editLastUserPrompt(page, prompt);
@@ -1032,7 +1120,28 @@ async function sendOrEdit(page, cfg, task, prompt, method) {
     await insertPrompt(page, prompt);
     await clickSend(page);
   }
+  await onSubmitted();
   return waitForReply(page, beforeTexts, cfg);
+}
+
+async function persistSubmittedTask(page, cfg, state, task, taskState, method) {
+  try {
+    await page.waitForURL((url) => /\/c\/[^/]+/.test(url.pathname), { timeout: 10000 });
+  } catch {
+    throw new QueueError(
+      `Prompt was submitted but ChatGPT did not expose a conversation URL: ${page.url()}`,
+      'page_structure',
+    );
+  }
+  const conversationUrl = page.url();
+  taskState.sent = true;
+  taskState.conversationUrl = conversationUrl;
+  taskState.updatedAt = nowIso();
+  state.currentConversationUrl = conversationUrl;
+  state.currentNovelKey = task.novelKey;
+  state.novelConversations[task.novelKey] = conversationUrl;
+  await saveState(cfg, state);
+  await logEvent(cfg, 'task_submitted', taskLogFields(task, { method, conversationUrl }));
 }
 
 function taskLogFields(task, extra = {}) {
@@ -1138,8 +1247,8 @@ async function processTask(page, cfg, state, task, taskState) {
       }
       taskState.status = 'running';
       taskState.currentAttempt = normalRetries + 1;
-      taskState.sent = method === 'edit-and-resend' ? taskState.sent : true;
-      taskState.conversationUrl = state.currentConversationUrl || page.url();
+      taskState.lastError = '';
+      if (taskState.sent) taskState.conversationUrl = state.currentConversationUrl || page.url();
       taskState.updatedAt = nowIso();
       await saveState(cfg, state);
       await logEvent(cfg, 'task_attempt_started', taskLogFields(task, {
@@ -1155,7 +1264,9 @@ async function processTask(page, cfg, state, task, taskState) {
         conversationUrl: taskState.conversationUrl,
       }));
 
-      const reply = await sendOrEdit(page, cfg, task, prompt, method);
+      const reply = await sendOrEdit(page, cfg, task, prompt, method, async () => {
+        await persistSubmittedTask(page, cfg, state, task, taskState, method);
+      });
 
       // 只保存回复内容；元信息（对话地址/时间/重试/恢复过程）已在 taskState 里，持久化到 state.json
       await atomicWrite(task.outputPath, reply.trim() + '\n');
@@ -1166,6 +1277,7 @@ async function processTask(page, cfg, state, task, taskState) {
       state.novelConversations[task.novelKey] = page.url();
 
       taskState.status = 'done';
+      delete taskState.restartRequired;
       taskState.retries = Number(taskState.retries || 0) + normalRetries;
       taskState.lastError = '';
       taskState.outputFile = task.outputPath;
@@ -1269,6 +1381,19 @@ async function printDryRun(projectRoot, cfg, state, tasks, opts) {
   console.log(`Input: ${cfg.inputDir}`);
   console.log(`Output: ${cfg.outputDir}`);
   console.log(`chaptersPerPrompt: ${cfg.chaptersPerPrompt}`);
+  if (cfg.chapterRange) {
+    const end = cfg.chapterRange.end === Infinity ? '末尾' : cfg.chapterRange.end;
+    console.log(`chapterRange: ${cfg.chapterRange.start}-${end}`);
+  }
+  if (cfg.skipNovelKeys.length > 0) {
+    console.log(`skipNovelKeys: ${cfg.skipNovelKeys.join(', ')}`);
+  }
+  if (cfg.restartNovelKeys.length > 0) {
+    console.log(`restartNovelKeys: ${cfg.restartNovelKeys.join(', ')}`);
+  }
+  if (cfg.freshConversationNovelKeys.length > 0) {
+    console.log(`freshConversationNovelKeys: ${cfg.freshConversationNovelKeys.join(', ')}`);
+  }
   console.log(`conversationScope: ${cfg.conversationScope}`);
   console.log(`retryMode: ${cfg.retryMode}`);
   console.log(`State: ${displayPath(projectRoot, cfg.stateFile)}`);
@@ -1279,7 +1404,10 @@ async function printDryRun(projectRoot, cfg, state, tasks, opts) {
 
   const allPending = tasks.filter((task) => {
     const item = state.tasks[taskStateKey(task)];
-    return opts.force || !(cfg.skipExisting && fssync.existsSync(task.outputPath)) || item?.status === 'failed';
+    if (opts.force) return true;
+    if (item?.restartRequired === true) return true;
+    if (cfg.skipExisting && fssync.existsSync(task.outputPath)) return false;
+    return item?.status !== 'done';
   });
   const pending = filterByPerNovelLimit(allPending, opts.perNovelLimit);
 
@@ -1313,7 +1441,37 @@ async function main() {
 
     const tasks = await buildTasks(cfg, opts);
     const state = await loadState(cfg, opts);
-    mergeStateTasks(cfg, state, tasks, opts, { exists: fssync.existsSync, now: nowIso });
+    const priorCompletedFiles = completedInputFiles(state);
+    state.restartedNovelKeys = state.restartedNovelKeys || {};
+    state.freshConversationNovelKeys = state.freshConversationNovelKeys || {};
+    const restartNovelKeys = new Set(
+      cfg.restartNovelKeys.filter((key) => !state.restartedNovelKeys[key]),
+    );
+    const freshConversationNovelKeys = new Set(
+      cfg.freshConversationNovelKeys.filter((key) => !state.freshConversationNovelKeys[key]),
+    );
+    for (const key of freshConversationNovelKeys) {
+      delete state.novelConversations[key];
+      if (state.currentNovelKey === key) {
+        state.currentTaskId = null;
+        state.currentNovelKey = null;
+        state.currentConversationUrl = null;
+      }
+      for (const item of Object.values(state.tasks)) {
+        if (item.novelKey === key) {
+          item.sent = false;
+          item.conversationUrl = '';
+        }
+      }
+    }
+    mergeStateTasks(cfg, state, tasks, opts, {
+      exists: fssync.existsSync,
+      now: nowIso,
+      restartNovelKeys,
+    });
+    preserveCompletedInputs(state, tasks, priorCompletedFiles);
+    for (const key of restartNovelKeys) state.restartedNovelKeys[key] = nowIso();
+    for (const key of freshConversationNovelKeys) state.freshConversationNovelKeys[key] = nowIso();
 
     // A plain dry run is a read-only preview. --reset-state remains an explicit mutation.
     if (!opts.dryRun || opts.resetState) await saveState(cfg, state);
@@ -1341,7 +1499,10 @@ async function main() {
     const { chromium } = await loadPlaywright();
     const browser = await chromium.connectOverCDP(cfg.cdpUrl);
     const context = browser.contexts()[0] || (await browser.newContext());
-    const page = context.pages().find((p) => p.url().startsWith('https://chatgpt.com/')) || (await context.newPage());
+    // Never reuse a user-owned ChatGPT tab. A fresh tab keeps queue navigation
+    // and automatic sends isolated from manually opened history conversations.
+    const page = await context.newPage();
+    queuePage = page;
 
     let ok = 0;
     let failed = 0;
@@ -1354,8 +1515,9 @@ async function main() {
         const key = taskStateKey(task);
         const item = state.tasks[key];
         const outputExists = fssync.existsSync(task.outputPath);
-        if (!opts.force && cfg.skipExisting && outputExists) continue;
-        if (item.status === 'done' && !opts.force) continue;
+        const restartRequired = item.restartRequired === true;
+        if (!restartRequired && !opts.force && cfg.skipExisting && outputExists) continue;
+        if (item.status === 'done' && !opts.force && !restartRequired) continue;
 
         // --per-novel-limit 限制单个 novelKey 本次运行处理的 pending 任务数。
         // 已 done/skip 的任务不计入；超出配额的 novelKey 的后续章节直接跳过。
@@ -1402,6 +1564,8 @@ async function main() {
         }
       }
     } finally {
+      if (!page.isClosed()) await page.close().catch(() => {});
+      if (queuePage === page) queuePage = null;
       await browser.close();
     }
 
