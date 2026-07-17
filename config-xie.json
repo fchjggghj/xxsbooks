@@ -17,6 +17,10 @@
   "maxPromptChars": 120000,
   "promptTemplate": "【严格按照提示词执行，注意上下文】\n\n{{content}}",
   "chaptersPerPrompt": 1,
+  "chapterRange": {
+    "start": 1,
+    "end": 60
+  },
   "conversationScope": "novel",
   "retryMode": "edit-and-resend",
   "maxRetries": 1,

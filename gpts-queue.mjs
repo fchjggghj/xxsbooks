@@ -889,12 +889,25 @@ async function insertPrompt(page, prompt) {
   await setEditableText(page, composer, prompt);
 }
 
+async function editableTextLength(locator) {
+  return locator.evaluate((el) => {
+    const value = el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement
+      ? el.value
+      : (el.textContent || '');
+    return value.trim().length;
+  });
+}
+
 async function clickSend(page) {
   // 只以新增用户消息作为提交成功信号。输入框清空可能由页面重绘造成，不能
   // 证明提示词已进入当前会话。
   const beforeUserCount = await page.locator(USER_SELECTOR).count();
-  const deadline = Date.now() + 15000;
+  // A long prompt on a brand-new GPT conversation can take more than 15 seconds
+  // to appear in the message list after the click, even though the button is enabled.
+  const deadline = Date.now() + 45000;
   let clicked = false;
+  let clickedAt = 0;
+  let usedKeyboardFallback = false;
   while (Date.now() < deadline) {
     if (!clicked) {
       for (const selector of SEND_BUTTON_SELECTORS) {
@@ -903,6 +916,7 @@ async function clickSend(page) {
           if ((await button.count()) > 0 && (await button.isVisible()) && (await button.isEnabled())) {
             await button.click({ timeout: 2000, noWaitAfter: true });
             clicked = true;
+            clickedAt = Date.now();
             break;
           }
         } catch {
@@ -912,6 +926,18 @@ async function clickSend(page) {
     }
     await page.waitForTimeout(250);
     if ((await page.locator(USER_SELECTOR).count()) > beforeUserCount) return;
+
+    // Some GPT landing pages expose an enabled send button whose pointer click
+    // does not submit. Only fall back to Enter when the same visible composer
+    // still contains the full prompt, which prevents duplicate sends.
+    if (clicked && !usedKeyboardFallback && Date.now() - clickedAt >= 8000) {
+      const composer = await firstComposer(page, 2000).catch(() => null);
+      if (composer && await editableTextLength(composer).catch(() => 0) > 0) {
+        await composer.click();
+        await page.keyboard.press('Enter');
+        usedKeyboardFallback = true;
+      }
+    }
   }
 
   throw new QueueError('ChatGPT send control did not submit the prompt.', 'page_structure');
