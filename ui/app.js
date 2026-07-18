@@ -49,6 +49,37 @@ const elements = {
   materialImportPreview: $('#material-import-preview'),
   materialImportApply: $('#material-import-apply'),
   materialSearchOutput: $('#material-search-output'),
+  // 月度投放
+  campaignState: $('#campaign-state'),
+  campaignRefresh: $('#campaign-refresh'),
+  campaignTick: $('#campaign-tick'),
+  campaignTickPublish: $('#campaign-tick-publish'),
+  campaignMeta: $('#campaign-meta'),
+  campaignLanes: $('#campaign-lanes'),
+  campaignMetricsState: $('#campaign-metrics-state'),
+  campaignMetricsLane: $('#campaign-metrics-lane'),
+  campaignReaders: $('#campaign-readers'),
+  campaignReadThrough: $('#campaign-read-through'),
+  campaignFollowers: $('#campaign-followers'),
+  campaignRevenue: $('#campaign-revenue'),
+  campaignComments: $('#campaign-comments'),
+  campaignMetricsNote: $('#campaign-metrics-note'),
+  campaignMetricsPreview: $('#campaign-metrics-preview'),
+  campaignMetricsApply: $('#campaign-metrics-apply'),
+  campaignDecisionState: $('#campaign-decision-state'),
+  campaignDecisionLane: $('#campaign-decision-lane'),
+  campaignDecision: $('#campaign-decision'),
+  campaignReason: $('#campaign-reason'),
+  campaignOverride: $('#campaign-override'),
+  campaignDecisionPreview: $('#campaign-decision-preview'),
+  campaignDecisionApply: $('#campaign-decision-apply'),
+  campaignEnrollState: $('#campaign-enroll-state'),
+  campaignEnrollLane: $('#campaign-enroll-lane'),
+  campaignEnrollFile: $('#campaign-enroll-file'),
+  campaignEnrollBook: $('#campaign-enroll-book'),
+  campaignEnrollPreview: $('#campaign-enroll-preview'),
+  campaignEnrollApply: $('#campaign-enroll-apply'),
+  campaignOutput: $('#campaign-output'),
   // Reconcile
   reconcileState: $('#reconcile-state'),
   reconcilePreview: $('#reconcile-preview'),
@@ -102,6 +133,7 @@ let statusLoading = false;
 let operationBusy = false;
 let fanqieBusy = false;
 let materialBusy = false;
+let campaignBusy = false;
 let toastTimer = null;
 
 async function api(path, options = {}) {
@@ -242,6 +274,7 @@ function setupTabs() {
       if (target === 'books' && !elements.booksList.dataset.loaded) refreshBooks({ quiet: true });
       if (target === 'fanqie' && !elements.fanqieBook.dataset.loaded) refreshFanqieLocal({ quiet: true });
       if (target === 'materials' && !elements.materialResults.dataset.loaded) refreshMaterialStatus({ quiet: true });
+      if (target === 'campaign' && !elements.campaignLanes.dataset.loaded) refreshCampaignStatus({ quiet: true });
       if (target === 'config' && !elements.configEditor.dataset.loaded) loadConfig().catch(() => {});
     });
   });
@@ -468,6 +501,175 @@ async function importSelectedMaterial(apply = false) {
   } finally {
     setMaterialBusy(false);
   }
+}
+
+const campaignPhaseLabels = {
+  source_incomplete: '原文不足', chai_pending: '待拆改编', xie_pending: '待写正文',
+  awaiting_fanqie_binding: '待绑定番茄', account_binding_mismatch: '账号不匹配',
+  ready_to_publish: '可发布', publishing: '发布中', publish_attention: '发布需核对',
+  observing: '观察中', metrics_due: '待录成绩', decision_due: '待决策', awaiting_replacement: '待补新书',
+};
+
+function setCampaignBusy(value, message = '等待操作') {
+  campaignBusy = value;
+  for (const button of [
+    elements.campaignRefresh, elements.campaignTick, elements.campaignMetricsPreview, elements.campaignMetricsApply,
+    elements.campaignDecisionPreview, elements.campaignDecisionApply,
+    elements.campaignEnrollPreview, elements.campaignEnrollApply,
+  ]) button.disabled = value;
+  if (value) elements.campaignState.textContent = message;
+}
+
+function fillLaneSelect(select, lanes, onlyEmpty = false) {
+  const previous = select.value;
+  select.replaceChildren();
+  for (const lane of lanes) {
+    if (onlyEmpty && lane.current) continue;
+    const option = document.createElement('option');
+    option.value = String(lane.lane);
+    option.textContent = `投放线 ${lane.lane} · ${lane.current?.book || '空位'} · ${lane.accountRef}`;
+    select.append(option);
+  }
+  if (!select.options.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = onlyEmpty ? '当前没有待补空位' : '没有投放线';
+    select.append(option);
+  }
+  if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+}
+
+function renderCampaignLanes(data) {
+  elements.campaignLanes.replaceChildren();
+  for (const lane of data.lanes || []) {
+    const card = document.createElement('article');
+    card.className = 'book-card';
+    const title = document.createElement('div');
+    title.className = 'book-title';
+    title.textContent = `投放线 ${lane.lane} · ${lane.current?.book || '等待补入新书'}`;
+    card.append(title);
+    const rows = [
+      ['状态', campaignPhaseLabels[lane.phase] || lane.phase],
+      ['账号', lane.accountRef],
+      ['周期', lane.current?.cycle?.id || lane.pendingCycle?.id || '—'],
+      ['目标', lane.current ? `${lane.current.targetChapters} 章` : '—'],
+      ['拆改编', lane.pipeline ? `${lane.pipeline.chai.count}/${lane.current.targetChapters}` : '—'],
+      ['写', lane.pipeline ? `${lane.pipeline.xie.count}/${lane.current.targetChapters}` : '—'],
+      ['番茄确认', lane.fanqie?.bound ? `${lane.fanqie.confirmed}/${lane.current.targetChapters}` : '未绑定'],
+    ];
+    for (const [name, value] of rows) {
+      const row = document.createElement('div');
+      row.className = 'volume-row';
+      const label = document.createElement('span');
+      label.className = 'vol-name';
+      label.textContent = `${name}：${value}`;
+      row.append(label);
+      card.append(row);
+    }
+    const action = document.createElement('p');
+    action.className = 'muted';
+    action.textContent = `下一步：${lane.nextAction}`;
+    card.append(action);
+    elements.campaignLanes.append(card);
+  }
+}
+
+async function refreshCampaignStatus({ quiet = false } = {}) {
+  if (campaignBusy) return;
+  setCampaignBusy(true, '正在读取投放状态…');
+  try {
+    const data = await api('/api/campaign/status');
+    if (!data.initialized) {
+      setPill(elements.campaignState, '尚未初始化', 'warning');
+      elements.campaignMeta.textContent = `当前周期 ${data.currentCycle.id}；需要先执行 bootstrap。`;
+      return;
+    }
+    setPill(elements.campaignState, !data.ok ? '存在阻塞' : data.attentionRequired ? '需要处理' : '投放状态正常', !data.ok ? 'danger' : data.attentionRequired ? 'warning' : 'success');
+    elements.campaignMeta.textContent = `${data.activeCycle.id}：${data.activeCycle.startDate} 开始，${data.activeCycle.evaluateOn} 评估；阶段统计 ${JSON.stringify(data.phaseCounts)}。`;
+    renderCampaignLanes(data);
+    fillLaneSelect(elements.campaignMetricsLane, data.lanes);
+    fillLaneSelect(elements.campaignDecisionLane, data.lanes);
+    fillLaneSelect(elements.campaignEnrollLane, data.lanes, true);
+    elements.campaignLanes.dataset.loaded = '1';
+  } catch (error) {
+    setPill(elements.campaignState, '读取失败', 'danger');
+    if (!quiet) showToast(error.message, 'error');
+  } finally {
+    setCampaignBusy(false);
+  }
+}
+
+async function runCampaignEndpoint(command, body, apply = false) {
+  if (campaignBusy) return;
+  if (apply) {
+    const question = command === 'metrics' ? '确认保存这条投放线的成绩？'
+      : command === 'decide' ? '确认应用续写/淘汰决策？该操作会修改书籍目标或停用旧书。'
+        : '确认从素材库创建新书并占用这条投放线？';
+    if (!window.confirm(question)) return;
+  }
+  setCampaignBusy(true, apply ? '正在应用投放操作…' : '正在生成预览…');
+  try {
+    const result = await api(`/api/campaign/${command}`, { method: 'POST', body: JSON.stringify({ ...body, apply }) });
+    elements.campaignOutput.textContent = JSON.stringify(result, null, 2);
+    showToast(apply ? '投放状态已更新。' : '投放操作预览已生成。', 'success');
+  } catch (error) {
+    elements.campaignOutput.textContent = JSON.stringify(error.payload || { error: error.message }, null, 2);
+    showToast(error.message, 'error');
+  } finally {
+    setCampaignBusy(false);
+    await refreshCampaignStatus({ quiet: true });
+  }
+}
+
+async function runCampaignTick() {
+  if (campaignBusy) return;
+  const publish = elements.campaignTickPublish.checked;
+  const question = publish
+    ? '允许执行投放流水线下一步；如果下一步是番茄发布，将正式提交。确认继续？'
+    : '执行投放流水线的安全下一步？拆改编/写会启动；番茄发布只提示，不会提交。';
+  if (!window.confirm(question)) return;
+  setCampaignBusy(true, '正在编排下一步…');
+  try {
+    const result = await api('/api/campaign/tick', { method: 'POST', body: JSON.stringify({ apply: true, publish }) });
+    elements.campaignOutput.textContent = JSON.stringify(result, null, 2);
+    showToast(result.applied ? `已启动：${result.action}` : `当前需要：${result.action}`, result.applied ? 'success' : 'info');
+  } catch (error) {
+    elements.campaignOutput.textContent = JSON.stringify(error.payload || { error: error.message }, null, 2);
+    showToast(error.message, 'error');
+  } finally {
+    setCampaignBusy(false);
+    await refreshCampaignStatus({ quiet: true });
+  }
+}
+
+function campaignMetricsBody() {
+  return {
+    lane: elements.campaignMetricsLane.value,
+    readers: elements.campaignReaders.value,
+    readThroughRate: elements.campaignReadThrough.value,
+    followers: elements.campaignFollowers.value,
+    revenueCny: elements.campaignRevenue.value,
+    comments: elements.campaignComments.value,
+    note: elements.campaignMetricsNote.value.trim(),
+  };
+}
+
+function campaignDecisionBody() {
+  return {
+    lane: elements.campaignDecisionLane.value,
+    decision: elements.campaignDecision.value,
+    reason: elements.campaignReason.value.trim(),
+    override: elements.campaignOverride.checked,
+  };
+}
+
+function campaignEnrollBody() {
+  return {
+    lane: elements.campaignEnrollLane.value,
+    sourceId: 'main',
+    relativePath: elements.campaignEnrollFile.value.trim(),
+    book: elements.campaignEnrollBook.value.trim(),
+  };
 }
 
 function fanqieRangeBody() {
@@ -885,6 +1087,14 @@ function setupEventListeners() {
   elements.materialQuery.addEventListener('keydown', (event) => { if (event.key === 'Enter') searchMaterials(); });
   elements.materialImportPreview.addEventListener('click', () => importSelectedMaterial(false));
   elements.materialImportApply.addEventListener('click', () => importSelectedMaterial(true));
+  elements.campaignRefresh.addEventListener('click', () => refreshCampaignStatus());
+  elements.campaignTick.addEventListener('click', runCampaignTick);
+  elements.campaignMetricsPreview.addEventListener('click', () => runCampaignEndpoint('metrics', campaignMetricsBody(), false));
+  elements.campaignMetricsApply.addEventListener('click', () => runCampaignEndpoint('metrics', campaignMetricsBody(), true));
+  elements.campaignDecisionPreview.addEventListener('click', () => runCampaignEndpoint('decide', campaignDecisionBody(), false));
+  elements.campaignDecisionApply.addEventListener('click', () => runCampaignEndpoint('decide', campaignDecisionBody(), true));
+  elements.campaignEnrollPreview.addEventListener('click', () => runCampaignEndpoint('enroll', campaignEnrollBody(), false));
+  elements.campaignEnrollApply.addEventListener('click', () => runCampaignEndpoint('enroll', campaignEnrollBody(), true));
   elements.reconcilePreview.addEventListener('click', () => runReconcile(false));
   elements.reconcileApply.addEventListener('click', () => runReconcile(true));
   elements.generateProgress.addEventListener('click', runGenerateProgress);

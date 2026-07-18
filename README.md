@@ -2,6 +2,13 @@
 
 > 当前版本采用“阶段配置 + 单书配置 + 单章任务 + 会话归属注册”的隔离结构。完整边界和操作方式见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
+项目已增加“每月 3 轮、6 条投放线”的业务编排层：素材库整本 TXT 自动拆章，依次经过“拆改编”和“写”，绑定独立番茄账号发布；每 10 天根据成绩续写 60 章或淘汰换书。详见 [docs/CAMPAIGN.md](docs/CAMPAIGN.md)。
+
+```powershell
+node control.mjs campaign status --json
+node control.mjs campaign tick
+```
+
 常用的单书命令：
 
 ```powershell

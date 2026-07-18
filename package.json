@@ -43,7 +43,13 @@
     "material:index": "node material-control.mjs index",
     "material:search": "node material-control.mjs search",
     "material:import": "node material-control.mjs import",
-    "check": "node --check gpts-queue.mjs && node --check queue-lock.mjs && node --check control.mjs && node --check local-ui.mjs && node --check ui/app.js && node --check fanqie-control.mjs && node --check material-control.mjs && node --check lib/queue/config.mjs && node --check lib/queue/page-errors.mjs && node --check lib/control/status.mjs && node --check lib/queue-state.mjs && node --check lib/assistant-text.mjs && node --check lib/chapter-title.mjs && node --check lib/book-catalog.mjs && node --check lib/task-scope.mjs && node --check lib/conversation-registry.mjs && node --check lib/fanqie-config.mjs && node --check lib/fanqie-browser.mjs && node --check lib/fanqie-lock.mjs && node --check lib/fanqie-state.mjs && node --check lib/fanqie-evidence.mjs && node --check lib/fanqie-service.mjs && node --check lib/fanqie-page-contract.mjs && node --check lib/external-resources.mjs && node --check lib/material-catalog.mjs && node --check scripts/restore-original-titles.mjs && node --check scripts/create-book-config.mjs && node --check scripts/bind-fanqie.mjs && node --check scripts/import-external-resources.mjs",
+    "campaign:status": "node campaign-control.mjs status",
+    "campaign:tick": "node campaign-control.mjs tick",
+    "campaign:bootstrap": "node campaign-control.mjs bootstrap",
+    "campaign:enroll": "node campaign-control.mjs enroll",
+    "campaign:metrics": "node campaign-control.mjs metrics",
+    "campaign:decide": "node campaign-control.mjs decide",
+    "check": "node --check gpts-queue.mjs && node --check queue-lock.mjs && node --check control.mjs && node --check local-ui.mjs && node --check ui/app.js && node --check fanqie-control.mjs && node --check material-control.mjs && node --check campaign-control.mjs && node --check lib/queue/config.mjs && node --check lib/queue/page-errors.mjs && node --check lib/control/status.mjs && node --check lib/queue-state.mjs && node --check lib/assistant-text.mjs && node --check lib/chapter-title.mjs && node --check lib/book-catalog.mjs && node --check lib/task-scope.mjs && node --check lib/conversation-registry.mjs && node --check lib/fanqie-config.mjs && node --check lib/fanqie-browser.mjs && node --check lib/fanqie-lock.mjs && node --check lib/fanqie-state.mjs && node --check lib/fanqie-evidence.mjs && node --check lib/fanqie-service.mjs && node --check lib/fanqie-page-contract.mjs && node --check lib/external-resources.mjs && node --check lib/material-catalog.mjs && node --check lib/campaign.mjs && node --check scripts/restore-original-titles.mjs && node --check scripts/create-book-config.mjs && node --check scripts/bind-fanqie.mjs && node --check scripts/import-external-resources.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

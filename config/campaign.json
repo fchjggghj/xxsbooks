@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "每月三轮六书投放",
+  "timeZone": "Asia/Shanghai",
+  "laneCount": 6,
+  "initialChapters": 60,
+  "continuationChapters": 60,
+  "cycleStartDays": [1, 11, 21],
+  "stageLabels": {
+    "chai": "拆改编",
+    "xie": "写"
+  },
+  "accountPolicy": {
+    "oneActiveBookPerAccount": true,
+    "preferInitializedProfiles": true
+  },
+  "performance": {
+    "mode": "manual",
+    "requiredMetrics": ["readers", "readThroughRate"],
+    "thresholds": {
+      "readers": null,
+      "readThroughRate": null,
+      "followers": null,
+      "revenueCny": null
+    },
+    "minimumPasses": 2
+  }
+}

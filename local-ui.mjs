@@ -7,6 +7,7 @@ import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { assertSafePathSegment, resolveInside } from './lib/path-safety.mjs';
 import { runMaterialControl } from './material-control.mjs';
+import { runCampaignControl } from './campaign-control.mjs';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 3210;
@@ -498,6 +499,37 @@ async function materialCommand(args) {
   return runMaterialControl(args, projectRoot);
 }
 
+async function campaignCommand(args) {
+  return runCampaignControl(args, projectRoot);
+}
+
+function appendCampaignValue(args, body, field, flag = field) {
+  const value = body[field];
+  if (value == null || value === '') return;
+  args.push(`--${flag}`, String(value));
+}
+
+async function handleCampaignCommand(req, res, command) {
+  if (!isSameOriginWrite(req, handleCampaignCommand.port)) throw new HttpError(403, '拒绝非同源写请求。');
+  const body = await readJsonBody(req);
+  const args = [command];
+  const mappings = {
+    lane: 'lane', sourceId: 'source', relativePath: 'file', book: 'book', readers: 'readers',
+    readThroughRate: 'read-through-rate', followers: 'followers', revenueCny: 'revenue-cny',
+    comments: 'comments', note: 'note', decision: 'decision', reason: 'reason', month: 'month', cycle: 'cycle',
+  };
+  for (const [field, flag] of Object.entries(mappings)) appendCampaignValue(args, body, field, flag);
+  if (body.override === true) args.push('--override');
+  if (body.publish === true) args.push('--publish');
+  if (body.apply === true) args.push('--apply');
+  acquireWriteLock();
+  try {
+    sendJson(res, 200, await campaignCommand(args));
+  } finally {
+    releaseWriteLock();
+  }
+}
+
 async function handleMaterialIndex(req, res) {
   if (!isSameOriginWrite(req, handleMaterialIndex.port)) throw new HttpError(403, '拒绝非同源写请求。');
   await readJsonBody(req);
@@ -728,6 +760,7 @@ function createServer(port) {
   handleFanqieCommand.port = port;
   handleMaterialIndex.port = port;
   handleMaterialImport.port = port;
+  handleCampaignCommand.port = port;
   saveConfig.port = port;
 
   return http.createServer(async (req, res) => {
@@ -769,6 +802,10 @@ function createServer(port) {
         const query = url.searchParams.get('query') || '';
         const limit = url.searchParams.get('limit') || '50';
         sendJson(res, 200, await materialCommand(['search', '--query', query, '--limit', limit]));
+        return;
+      }
+      if (method === 'GET' && pathname === '/api/campaign/status') {
+        sendJson(res, 200, await campaignCommand(['status']));
         return;
       }
       if (method === 'GET' && pathname === '/api/config') {
@@ -832,6 +869,12 @@ function createServer(port) {
       }
       if (method === 'POST' && pathname === '/api/material/import') {
         await handleMaterialImport(req, res);
+        return;
+      }
+      if (method === 'POST' && pathname.startsWith('/api/campaign/')) {
+        const command = pathname.slice('/api/campaign/'.length);
+        if (!['tick', 'bootstrap', 'enroll', 'metrics', 'decide'].includes(command)) throw new HttpError(404, '投放接口不存在。');
+        await handleCampaignCommand(req, res, command);
         return;
       }
       if (method === 'POST' && pathname === '/api/config') {

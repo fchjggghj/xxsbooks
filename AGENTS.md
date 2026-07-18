@@ -44,6 +44,14 @@ Prior volume context injection (`priorVolumeContext` in config-xie, only effecti
 - Material sources are read-only. `material index` only writes metadata under `书籍/.state/materials/`; `material import` copies only one explicitly selected file and is preview-only without `--apply`.
 - Never overwrite an already imported material file automatically, and reject any source or destination path traversal.
 
+## Campaign contract
+
+- The monthly workflow has six persistent lanes and three cycles starting on days 1, 11, and 21. Initial and continuation targets are 60 chapters unless `config/campaign.json` explicitly changes them.
+- A lane owns one active book and one local Fanqie `accountRef`. A continue decision keeps both and extends the target; a replace decision disables the old book before a material novel can enter that lane.
+- Campaign enrollment must preserve material provenance, split only recognized `第N章` blocks, create an explicit book config, and never overwrite an existing book.
+- `campaign tick` may start chai/xie only when the global queue is idle. It may publish only with both `--apply` and `--publish`, and it must keep all Fanqie preflight, lock, title, schedule, and confirmation gates.
+- Metrics and decisions are durable and auditable. Do not infer performance thresholds or automatically retire a book while performance mode is manual.
+
 ## Validation
 
 Use these non-starting checks:

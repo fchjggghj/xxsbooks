@@ -19,6 +19,7 @@ import { createControlStatusRuntime } from './lib/control/status.mjs';
 import { runFanqieControl } from './fanqie-control.mjs';
 import { runMaterialControl } from './material-control.mjs';
 import { runExternalResourceImport } from './scripts/import-external-resources.mjs';
+import { runCampaignControl } from './campaign-control.mjs';
 
 const projectRoot = path.resolve(
   process.env.XXSBOOKS_PROJECT_ROOT || path.dirname(fileURLToPath(import.meta.url)),
@@ -44,6 +45,7 @@ Usage:
   node control.mjs fanqie <local-status|chrome|status|upload|reconcile> [...番茄参数]
   node control.mjs resources import --fanqie-root <目录> --material-root <目录> [--apply] [--json]
   node control.mjs material <local-status|index|search|import> [...素材参数]
+  node control.mjs campaign <status|tick|bootstrap|enroll|metrics|decide> [...投放参数]
 
 status and reconcile without --apply are read-only. start/resume run in the background.
 --limit N: 本次运行最多处理 N 个 pending 任务（全局顺序截断）。
@@ -636,6 +638,24 @@ async function preflight() {
     checks.push({ name: '番茄本地配置', ok: false, detail: error.message });
   }
 
+  // 8. 月度投放只做本地完整性检查，不推进队列或访问番茄远端。
+  try {
+    const campaign = await runCampaignControl(['status'], projectRoot);
+    const blockingPhases = new Set(['source_incomplete', 'awaiting_fanqie_binding', 'account_binding_mismatch', 'publish_attention']);
+    const blocked = (campaign.lanes || []).filter((lane) => blockingPhases.has(lane.phase));
+    checks.push({
+      name: '月度投放六线完整性',
+      ok: campaign.initialized === true && (campaign.lanes || []).length === 6 && blocked.length === 0,
+      detail: campaign.initialized !== true
+        ? '尚未初始化 campaign'
+        : blocked.length
+          ? blocked.map((lane) => `线${lane.lane}:${lane.phase}`).join('，')
+          : `${campaign.activeCycle.id}，6 条投放线无本地阻塞`,
+    });
+  } catch (error) {
+    checks.push({ name: '月度投放六线完整性', ok: false, detail: error.message });
+  }
+
   const allOk = checks.every((c) => c.ok);
   return { ok: allOk, command: 'preflight', checks, summary: `${checks.filter((c) => c.ok).length}/${checks.length} 通过` };
 }
@@ -769,6 +789,12 @@ async function main() {
       throw new Error('resources 当前仅支持 import。');
     }
     const result = await runExternalResourceImport(rawArgs[1] === 'import' ? rawArgs.slice(2) : rawArgs.slice(1), projectRoot);
+    if (result.help) console.log(result.help);
+    else printResult(result, rawArgs.includes('--json'));
+    return;
+  }
+  if (rawArgs[0] === 'campaign') {
+    const result = await runCampaignControl(rawArgs.slice(1), projectRoot);
     if (result.help) console.log(result.help);
     else printResult(result, rawArgs.includes('--json'));
     return;

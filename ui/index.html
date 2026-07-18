@@ -24,6 +24,7 @@
     <nav class="tabs" role="tablist" aria-label="功能分区">
       <button class="tab tab-active" role="tab" aria-selected="true" data-tab="overview">概览</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="control">队列控制</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="campaign">月度投放</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="fanqie">番茄发布</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="materials">素材库</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="books">书籍管理</button>
@@ -249,7 +250,57 @@
         </section>
       </section>
 
-      <!-- Tab 3: 番茄发布 -->
+      <!-- Tab 3: 月度投放 -->
+      <section id="tab-campaign" class="tab-panel" role="tabpanel" aria-label="月度投放" hidden>
+        <article class="card books-list-card">
+          <div class="section-heading">
+            <div><p class="card-kicker">每月三轮 · 六条投放线</p><h2>拆改编 → 写 → 番茄 → 成绩决策</h2></div>
+            <div class="logs-controls">
+              <span id="campaign-state" class="status-pill status-neutral">尚未读取</span>
+              <button id="campaign-refresh" class="button button-secondary" type="button">刷新投放状态</button>
+              <button id="campaign-tick" class="button button-primary" type="button">执行安全下一步</button>
+            </div>
+          </div>
+          <p id="campaign-meta" class="muted">每本首轮 60 章；好书续写下一段 60 章，不达标的书释放原投放线并从素材库换书。</p>
+          <label class="checkbox-row"><input id="campaign-tick-publish" type="checkbox"><span>下一步是番茄发布时，允许调用正式发布（仍执行全部远端门禁）</span></label>
+          <div id="campaign-lanes" class="books-list" aria-live="polite"></div>
+        </article>
+
+        <section class="workspace-grid">
+          <article class="card">
+            <div class="section-heading"><div><p class="card-kicker">观察期结果</p><h2>记录成绩</h2></div><span id="campaign-metrics-state" class="muted">等待操作</span></div>
+            <div class="form-row"><label for="campaign-metrics-lane">投放线</label><select id="campaign-metrics-lane"></select></div>
+            <div class="form-row"><label for="campaign-readers">有效读者</label><input id="campaign-readers" type="number" min="0"></div>
+            <div class="form-row"><label for="campaign-read-through">读完率（%）</label><input id="campaign-read-through" type="number" min="0" max="100" step="0.01"></div>
+            <div class="form-row"><label for="campaign-followers">新增追更</label><input id="campaign-followers" type="number" min="0"></div>
+            <div class="form-row"><label for="campaign-revenue">收益（元）</label><input id="campaign-revenue" type="number" min="0" step="0.01"></div>
+            <div class="form-row"><label for="campaign-comments">评论数</label><input id="campaign-comments" type="number" min="0"></div>
+            <div class="form-row"><label for="campaign-metrics-note">备注</label><input id="campaign-metrics-note" type="text" placeholder="数据来源、异常说明等"></div>
+            <div class="button-row"><button id="campaign-metrics-preview" class="button button-secondary" type="button">预览成绩</button><button id="campaign-metrics-apply" class="button button-primary" type="button">保存成绩</button></div>
+          </article>
+
+          <article class="card">
+            <div class="section-heading"><div><p class="card-kicker">观察期结束后</p><h2>续写或淘汰</h2></div><span id="campaign-decision-state" class="muted">等待操作</span></div>
+            <div class="form-row"><label for="campaign-decision-lane">投放线</label><select id="campaign-decision-lane"></select></div>
+            <div class="form-row"><label for="campaign-decision">决策</label><select id="campaign-decision"><option value="continue">成绩好，续写 60 章</option><option value="replace">成绩差，淘汰换书</option></select></div>
+            <div class="form-row"><label for="campaign-reason">决策依据</label><input id="campaign-reason" type="text" placeholder="必须填写"></div>
+            <label class="checkbox-row"><input id="campaign-override" type="checkbox"><span>观察期未结束时仍提前决策</span></label>
+            <div class="button-row"><button id="campaign-decision-preview" class="button button-secondary" type="button">预览决策</button><button id="campaign-decision-apply" class="button button-danger" type="button">应用决策</button></div>
+          </article>
+        </section>
+
+        <article class="card">
+          <div class="section-heading"><div><p class="card-kicker">淘汰后的空投放线</p><h2>从素材库补入新书</h2></div><span id="campaign-enroll-state" class="muted">等待操作</span></div>
+          <p class="muted">整本 TXT 会自动识别“第N章”，首轮仅生成 60 个原文章节，并保留素材路径与哈希来源。</p>
+          <div class="form-row"><label for="campaign-enroll-lane">投放线</label><select id="campaign-enroll-lane"></select></div>
+          <div class="form-row"><label for="campaign-enroll-file">素材相对路径</label><input id="campaign-enroll-file" type="text" placeholder="例如 S/0017_小说名【女】71万.txt"></div>
+          <div class="form-row"><label for="campaign-enroll-book">改编后书名</label><input id="campaign-enroll-book" type="text" placeholder="项目中的新书名"></div>
+          <div class="button-row"><button id="campaign-enroll-preview" class="button button-secondary" type="button">预览换书</button><button id="campaign-enroll-apply" class="button button-danger" type="button">创建新书并入线</button></div>
+          <pre id="campaign-output" class="output-box" tabindex="0">尚未执行成绩或换书操作。</pre>
+        </article>
+      </section>
+
+      <!-- Tab 4: 番茄发布 -->
       <section id="tab-fanqie" class="tab-panel" role="tabpanel" aria-label="番茄发布" hidden>
         <section class="workspace-grid">
           <article class="card">
