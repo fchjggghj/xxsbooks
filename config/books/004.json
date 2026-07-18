@@ -1,1 +1,49 @@
-{"name":"快穿逆袭：这个宿主有点坏","enabled":true,"stages":{"chai":{"enabled":true,"chapterRange":{"start":1,"end":60}},"xie":{"enabled":true,"chapterRange":{"start":1,"end":60}}}}
+{
+  "name": "快穿逆袭：这个宿主有点坏",
+  "enabled": true,
+  "stages": {
+    "chai": {
+      "enabled": true,
+      "chapterRange": {
+        "start": 1,
+        "end": 60
+      }
+    },
+    "xie": {
+      "enabled": true,
+      "chapterRange": {
+        "start": 1,
+        "end": 60
+      }
+    }
+  },
+  "fanqie": {
+    "schemaVersion": 1,
+    "enabled": true,
+    "accountRef": "fanqie-06",
+    "workId": "7663929107935136793",
+    "workTitle": "快穿：影后宿主专治意难平",
+    "sourceDir": "正文",
+    "contestParticipation": true,
+    "aiUsed": true,
+    "contentDetection": "basic",
+    "quality": {
+      "minBodyChars": 1000,
+      "maxBodyChars": 30000,
+      "maxTitleChars": 30,
+      "minimumLeadMinutes": 15
+    },
+    "schedule": {
+      "firstChapter": 1,
+      "firstDate": "2026-07-20",
+      "chaptersPerDay": 4,
+      "time": "08:00",
+      "times": [
+        "08:00",
+        "12:00",
+        "18:00",
+        "21:00"
+      ]
+    }
+  }
+}

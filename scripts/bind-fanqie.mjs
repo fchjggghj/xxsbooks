@@ -11,6 +11,7 @@ function usage() {
 
 node scripts/bind-fanqie.mjs --book "书名" --account-ref fanqie-02 \\
   --work-id 123 --work-title "番茄书名" --ai-used true \\
+  --contest-participation true \\
   --first-chapter 5 --first-date 2026-07-19 --chapters-per-day 4 \\
   --times 08:00,12:00,18:00,21:00 [--apply]
 
@@ -99,6 +100,10 @@ async function main() {
   const shortcut = args.shortcut ? readShortcut(path.resolve(args.shortcut)) : null;
   const aiText = required(args, 'ai-used').toLowerCase();
   if (!['true', 'false'].includes(aiText)) throw new Error('--ai-used 必须是 true 或 false');
+  const contestText = String(args['contest-participation'] ?? 'true').toLowerCase();
+  if (!['true', 'false'].includes(contestText)) {
+    throw new Error('--contest-participation 必须是 true 或 false');
+  }
   const account = {
     ...(existingAccount || {}),
     label: args['account-label'] || existingAccount?.label || (args.shortcut ? path.basename(args.shortcut, '.lnk') : accountRef),
@@ -114,6 +119,7 @@ async function main() {
     workId: required(args, 'work-id'),
     workTitle: required(args, 'work-title'),
     sourceDir: args['source-dir'] || '正文',
+    contestParticipation: contestText === 'true',
     aiUsed: aiText === 'true',
     contentDetection: 'basic',
     quality: raw.fanqie?.quality || {

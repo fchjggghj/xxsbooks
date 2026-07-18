@@ -30,6 +30,11 @@ test('normalizes a per-book Fanqie binding', () => {
   assert.equal(value.cdpUrl, 'http://127.0.0.1:9333');
   assert.equal(value.sourceDir, '正文');
   assert.equal(value.aiUsed, true);
+  assert.equal(value.contestParticipation, true);
+  assert.throws(() => normalizeFanqieBinding({
+    profileDir: 'C:\\Profiles\\fanqie-01', workId: '1', workTitle: '书名',
+    sourceDir: '原文', aiUsed: false, schedule,
+  }), /必须固定为“正文”/);
   assert.throws(() => normalizeFanqieBinding({
     profileDir: 'relative-profile', workId: '1', workTitle: '书名', aiUsed: false, schedule,
   }), /必须是绝对路径/);
@@ -130,13 +135,15 @@ test('account registry resolves local profiles and reports port collisions', asy
   }
 });
 
-test('Fanqie publishing lock prevents concurrent upload and releases only its own lock', async () => {
+test('Fanqie publishing lock serializes one account while allowing independent accounts', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'fanqie-lock-'));
   try {
-    const lock = await acquireFanqieLock(root, '测试书');
-    await assert.rejects(() => acquireFanqieLock(root, '另一本书'), /已有番茄发布任务占用锁/);
+    const lock = await acquireFanqieLock(root, '测试书', 'account-01');
+    await assert.rejects(() => acquireFanqieLock(root, '另一本书', 'account-01'), /已有番茄发布任务占用锁/);
+    const parallel = await acquireFanqieLock(root, '并行书', 'account-02');
+    await parallel.release();
     await lock.release();
-    const next = await acquireFanqieLock(root, '另一本书');
+    const next = await acquireFanqieLock(root, '另一本书', 'account-01');
     await next.release();
   } finally {
     await fs.rm(root, { recursive: true, force: true });

@@ -14,6 +14,10 @@
     "oneActiveBookPerAccount": true,
     "preferInitializedProfiles": true
   },
+  "publishingDefaults": {
+    "contestParticipation": true,
+    "aiDisclosure": "explicit-per-book"
+  },
   "performance": {
     "mode": "manual",
     "requiredMetrics": ["readers", "readThroughRate"],

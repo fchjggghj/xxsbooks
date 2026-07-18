@@ -58,6 +58,8 @@ npm run fanqie:reconcile -- --apply
 
 每本书可在 `fanqie.quality` 调整正文字数上下限、标题最大长度和定时发布最小提前分钟数。预检还会阻止重复标题、Markdown 标题前缀、过去排期，并提示疑似 AI 助手话术或重复标题残留。AI 使用声明仍必须由 `aiUsed` 明确配置。
 
+新建作品默认参加当前可用征文，书籍绑定以 `contestParticipation: true` 记录该选择。AI 声明不跟随征文默认值：每本书必须根据实际创作过程明确设置 `aiUsed`，GPTS 流程产出的正文应设为 `true`。
+
 ## 首次绑定
 
 绑定命令默认只打印预览，不修改配置。它可以从已有 `.lnk` 快捷方式读取 `--user-data-dir` 和 `--profile-directory`：
@@ -69,6 +71,7 @@ npm run fanqie:bind -- `
   --shortcut "C:\路径\番茄账号.lnk" `
   --work-id 1234567890 `
   --work-title "番茄后台作品名" `
+  --contest-participation true `
   --ai-used true `
   --first-chapter 5 `
   --first-date 2026-07-19 `
@@ -85,8 +88,9 @@ npm run fanqie:bind -- `
 - `fanqie:chrome` 只启动绑定的专用 Profile 和专用 CDP 端口，不会结束任何 Chrome 进程。
 - 如果同一 Profile 已在普通 Chrome 中打开，CDP 可能无法启用。只关闭这个番茄账号窗口后重试，不要结束其他账号窗口。
 - 登录过期时，在弹出的专用 Chrome 窗口中手工重新登录，再运行 `fanqie:status`。
+- 发布器会自动处理新手引导，以及“我知道了”“下次再说”“关闭”等白名单安全弹窗；发布确认、内容检测、AI 声明等关键弹窗不做通用关闭，仍按明确配置执行。正文写入后还会核对编辑器中的实际文本，弹窗遮挡导致写入失败时会清除安全遮挡并重试一次。
 - AI 使用情况由配置中的 `aiUsed` 明确声明；发布器不会自行猜测或改变。
-- 应用发布时使用 `书籍/.state/fanqie/.publish.lock.json` 防止并发，并把逐章结果追加到 `书籍/.state/fanqie/run.log`。
+- 应用发布时按账号使用 `书籍/.state/fanqie/.publish.<accountRef>.lock.json` 防止同账号并发；不同账号可安全并行。逐章结果追加到 `书籍/.state/fanqie/run.log`。
 
 ## 本地控制台
 
