@@ -8,6 +8,7 @@ import { sortVolumeNames } from './lib/naming.mjs';
 import { taskStateKey, mergeStateTasks, firstRunnableTask } from './lib/queue-state.mjs';
 import { classifyQueueError, safeAppendJsonlLog } from './lib/structured-log.mjs';
 import { collectPriorVolumeContext } from './lib/prior-context.mjs';
+import { normalizeAssistantText } from './lib/assistant-text.mjs';
 
 let queueLockHandle = null;
 let queuePage = null;
@@ -744,7 +745,21 @@ async function firstComposer(page, timeoutMs = 90000) {
 
 async function assistantTexts(page) {
   try {
-    return await page.locator(ASSISTANT_SELECTOR).allTextContents();
+    const messages = page.locator(ASSISTANT_SELECTOR);
+    const count = await messages.count();
+    const texts = [];
+
+    for (let index = 0; index < count; index++) {
+      const message = messages.nth(index);
+      const markdown = message.locator('.markdown');
+      const markdownCount = await markdown.count();
+      const raw = markdownCount > 0
+        ? (await markdown.allInnerTexts()).join('\n\n')
+        : await message.innerText();
+      texts.push(normalizeAssistantText(raw));
+    }
+
+    return texts;
   } catch {
     return [];
   }
