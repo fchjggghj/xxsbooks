@@ -37,6 +37,13 @@ Prior volume context injection (`priorVolumeContext` in config-xie, only effecti
 - A publish apply requires a passing quality/schedule preflight and durable chapter phases. On uncertain submission, capture evidence and stop; use preview reconcile before any state repair.
 - The local UI must never poll Fanqie remotely or publish automatically. Remote access is user-triggered; apply requires typed confirmation plus a second confirmation dialog.
 
+## External resource contract
+
+- Chrome login profiles and bulk material libraries remain outside the repository. Register their absolute paths in ignored `config/local/*.json`; never copy cookies, browser caches, or a whole material library into Git.
+- Import accounts by matching the normalized Profile path so an existing `accountRef` remains stable. Account discovery and indexing must not launch Chrome.
+- Material sources are read-only. `material index` only writes metadata under `书籍/.state/materials/`; `material import` copies only one explicitly selected file and is preview-only without `--apply`.
+- Never overwrite an already imported material file automatically, and reject any source or destination path traversal.
+
 ## Validation
 
 Use these non-starting checks:

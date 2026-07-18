@@ -36,6 +36,19 @@ const elements = {
   fanqieReconcileApply: $('#fanqie-reconcile-apply'),
   fanqieUploadApply: $('#fanqie-upload-apply'),
   fanqieRemoteOutput: $('#fanqie-remote-output'),
+  // 素材库
+  materialState: $('#material-state'),
+  materialActionState: $('#material-action-state'),
+  materialRefresh: $('#material-refresh'),
+  materialIndex: $('#material-index'),
+  materialStatusOutput: $('#material-status-output'),
+  materialQuery: $('#material-query'),
+  materialSearch: $('#material-search'),
+  materialResults: $('#material-results'),
+  materialBook: $('#material-book'),
+  materialImportPreview: $('#material-import-preview'),
+  materialImportApply: $('#material-import-apply'),
+  materialSearchOutput: $('#material-search-output'),
   // Reconcile
   reconcileState: $('#reconcile-state'),
   reconcilePreview: $('#reconcile-preview'),
@@ -88,6 +101,7 @@ const elements = {
 let statusLoading = false;
 let operationBusy = false;
 let fanqieBusy = false;
+let materialBusy = false;
 let toastTimer = null;
 
 async function api(path, options = {}) {
@@ -227,6 +241,7 @@ function setupTabs() {
       // 切到功能页时按需加载；番茄只读取本地状态，不自动访问远端。
       if (target === 'books' && !elements.booksList.dataset.loaded) refreshBooks({ quiet: true });
       if (target === 'fanqie' && !elements.fanqieBook.dataset.loaded) refreshFanqieLocal({ quiet: true });
+      if (target === 'materials' && !elements.materialResults.dataset.loaded) refreshMaterialStatus({ quiet: true });
       if (target === 'config' && !elements.configEditor.dataset.loaded) loadConfig().catch(() => {});
     });
   });
@@ -342,6 +357,116 @@ async function refreshFanqieLocal({ quiet = false } = {}) {
     if (!quiet) showToast(error.message, 'error');
   } finally {
     elements.fanqieRefreshLocal.disabled = false;
+  }
+}
+
+function setMaterialBusy(value, message = '等待操作') {
+  materialBusy = value;
+  for (const button of [elements.materialRefresh, elements.materialIndex, elements.materialSearch, elements.materialImportPreview, elements.materialImportApply]) {
+    button.disabled = value;
+  }
+  elements.materialActionState.textContent = message;
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let amount = bytes;
+  let unit = -1;
+  do { amount /= 1024; unit++; } while (amount >= 1024 && unit < units.length - 1);
+  return `${amount.toFixed(2)} ${units[unit]}`;
+}
+
+async function refreshMaterialStatus({ quiet = false } = {}) {
+  if (materialBusy) return;
+  setMaterialBusy(true, '正在读取素材状态…');
+  try {
+    const [status, books] = await Promise.all([api('/api/material/local-status'), api('/api/books')]);
+    setPill(elements.materialState, status.ok && status.indexed ? '索引可用' : '需要建立索引', status.ok && status.indexed ? 'success' : 'warning');
+    elements.materialStatusOutput.textContent = JSON.stringify({
+      ...status,
+      totalSize: formatBytes(status.totalBytes),
+    }, null, 2);
+    const previousBook = elements.materialBook.value;
+    elements.materialBook.replaceChildren();
+    for (const item of books.books || []) {
+      const option = document.createElement('option');
+      option.value = item.name;
+      option.textContent = item.name;
+      elements.materialBook.append(option);
+    }
+    if ([...elements.materialBook.options].some((option) => option.value === previousBook)) elements.materialBook.value = previousBook;
+    elements.materialResults.dataset.loaded = '1';
+  } catch (error) {
+    setPill(elements.materialState, '读取失败', 'danger');
+    elements.materialStatusOutput.textContent = `失败：${error.message}`;
+    if (!quiet) showToast(error.message, 'error');
+  } finally {
+    setMaterialBusy(false);
+  }
+}
+
+async function rebuildMaterialIndex() {
+  if (materialBusy || !window.confirm('重建素材元数据索引？不会读取或修改素材正文。')) return;
+  setMaterialBusy(true, '正在重建索引…');
+  try {
+    const result = await api('/api/material/index', { method: 'POST', body: JSON.stringify({}) });
+    elements.materialStatusOutput.textContent = JSON.stringify({ ...result, totalSize: formatBytes(result.totalBytes) }, null, 2);
+    showToast(`已索引 ${result.fileCount} 个素材文件。`, 'success');
+  } catch (error) {
+    elements.materialStatusOutput.textContent = `失败：${error.message}`;
+    showToast(error.message, 'error');
+  } finally {
+    setMaterialBusy(false);
+    await refreshMaterialStatus({ quiet: true });
+  }
+}
+
+async function searchMaterials() {
+  if (materialBusy) return;
+  const query = elements.materialQuery.value.trim();
+  if (!query) { showToast('请输入素材关键词。', 'warning'); return; }
+  setMaterialBusy(true, '正在搜索…');
+  try {
+    const result = await api(`/api/material/search?query=${encodeURIComponent(query)}&limit=100`);
+    elements.materialResults.replaceChildren();
+    for (const item of result.items || []) {
+      const option = document.createElement('option');
+      option.value = item.relativePath;
+      option.dataset.sourceId = item.sourceId;
+      option.textContent = `${item.title} · ${formatBytes(item.sizeBytes)} · ${item.relativePath}`;
+      elements.materialResults.append(option);
+    }
+    elements.materialSearchOutput.textContent = JSON.stringify(result, null, 2);
+    elements.materialActionState.textContent = `找到 ${result.totalMatches} 项`;
+  } catch (error) {
+    elements.materialSearchOutput.textContent = `失败：${error.message}`;
+    showToast(error.message, 'error');
+  } finally {
+    setMaterialBusy(false, elements.materialActionState.textContent);
+  }
+}
+
+async function importSelectedMaterial(apply = false) {
+  if (materialBusy) return;
+  const option = elements.materialResults.selectedOptions[0];
+  const book = elements.materialBook.value;
+  if (!option || !book) { showToast('请选择素材文件和目标书籍。', 'warning'); return; }
+  if (apply && !window.confirm(`把所选素材复制到《${book}》的素材目录？`)) return;
+  setMaterialBusy(true, apply ? '正在复制素材…' : '正在预览导入…');
+  try {
+    const result = await api('/api/material/import', {
+      method: 'POST',
+      body: JSON.stringify({ sourceId: option.dataset.sourceId || 'main', relativePath: option.value, book, apply }),
+    });
+    elements.materialSearchOutput.textContent = JSON.stringify(result, null, 2);
+    showToast(apply ? '素材已复制到书籍素材目录。' : '导入预览已生成。', 'success');
+  } catch (error) {
+    elements.materialSearchOutput.textContent = `失败：${error.message}`;
+    showToast(error.message, 'error');
+  } finally {
+    setMaterialBusy(false);
   }
 }
 
@@ -754,6 +879,12 @@ function setupEventListeners() {
   elements.fanqieReconcilePreview.addEventListener('click', () => runFanqieCommand('reconcile'));
   elements.fanqieReconcileApply.addEventListener('click', () => runFanqieCommand('reconcile', true));
   elements.fanqieUploadApply.addEventListener('click', () => runFanqieCommand('upload', true));
+  elements.materialRefresh.addEventListener('click', () => refreshMaterialStatus());
+  elements.materialIndex.addEventListener('click', rebuildMaterialIndex);
+  elements.materialSearch.addEventListener('click', searchMaterials);
+  elements.materialQuery.addEventListener('keydown', (event) => { if (event.key === 'Enter') searchMaterials(); });
+  elements.materialImportPreview.addEventListener('click', () => importSelectedMaterial(false));
+  elements.materialImportApply.addEventListener('click', () => importSelectedMaterial(true));
   elements.reconcilePreview.addEventListener('click', () => runReconcile(false));
   elements.reconcileApply.addEventListener('click', () => runReconcile(true));
   elements.generateProgress.addEventListener('click', runGenerateProgress);

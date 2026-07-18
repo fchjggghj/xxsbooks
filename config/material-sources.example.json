@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "sources": {
+    "main": {
+      "label": "本机素材库",
+      "root": "D:\\素材库",
+      "mode": "read-only",
+      "extensions": [
+        ".txt",
+        ".md"
+      ]
+    }
+  }
+}

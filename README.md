@@ -26,6 +26,14 @@ npm run ui
 
 账号的真实 Profile 路径放在被 Git 忽略的 `config/local/fanqie-accounts.json`；书籍配置只保存可迁移的 `accountRef`。发布过程带逐章持久化状态、质量门禁、reconcile 和失败截图留证。
 
+独立 Chrome 账号目录和大型素材库可以作为“本机外部资源”接入，不复制登录态或整库正文。完整说明见 [docs/EXTERNAL_RESOURCES.md](docs/EXTERNAL_RESOURCES.md)：
+
+```powershell
+node control.mjs resources import --fanqie-root "C:\Users\Administrator\Desktop\番茄账号-独立Chrome" --material-root "D:\素材库" --apply
+node control.mjs material index --apply
+node control.mjs material search --query "快穿 反派"
+```
+
 写正文时，章节标题固定取同章 `原文` 文件首行；提示词和落盘阶段都会校验，GPT不能自行改题。
 
 这是一个本地批量队列工具，用 Chrome 自动化把小说章节发送给 ChatGPT GPTS，并把回复保存到本地文件。

@@ -9,11 +9,12 @@ const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 function usage() {
   return `绑定一本书到本地番茄账号（默认仅预览）
 
-node scripts/bind-fanqie.mjs --book "书名" --account-ref account-01 --shortcut "账号.lnk" \\
+node scripts/bind-fanqie.mjs --book "书名" --account-ref fanqie-02 \\
   --work-id 123 --work-title "番茄书名" --ai-used true \\
   --first-chapter 5 --first-date 2026-07-19 --chapters-per-day 4 --time 00:00 [--apply]
 
-也可用 --profile-dir 绝对路径 [--profile-name Default] 代替 --shortcut。`;
+accountRef 已在 config/local/fanqie-accounts.json 中登记时，无需重复提供 Profile。
+新账号也可用 --shortcut，或用 --profile-dir 绝对路径 [--profile-name Default]。`;
 }
 
 function parseArgs(argv) {
@@ -92,15 +93,18 @@ async function main() {
   const { file, raw } = await findBookConfig(bookName);
   const accountRef = String(args['account-ref'] || raw.fanqie?.accountRef || '').trim();
   if (!/^[a-zA-Z0-9._-]+$/.test(accountRef)) throw new Error('--account-ref 必须使用字母、数字、点、下划线或连字符');
+  const registry = await readAccountRegistry();
+  const existingAccount = registry.raw.accounts?.[accountRef] || null;
   const shortcut = args.shortcut ? readShortcut(path.resolve(args.shortcut)) : null;
   const aiText = required(args, 'ai-used').toLowerCase();
   if (!['true', 'false'].includes(aiText)) throw new Error('--ai-used 必须是 true 或 false');
   const account = {
-    label: args['account-label'] || (args.shortcut ? path.basename(args.shortcut, '.lnk') : accountRef),
-    shortcutPath: args.shortcut ? path.resolve(args.shortcut) : undefined,
-    profileDir: args['profile-dir'] || shortcut?.profileDir,
-    profileName: args['profile-name'] || shortcut?.profileName || 'Default',
-    cdpPort: Number(args['cdp-port'] || 9333),
+    ...(existingAccount || {}),
+    label: args['account-label'] || existingAccount?.label || (args.shortcut ? path.basename(args.shortcut, '.lnk') : accountRef),
+    shortcutPath: args.shortcut ? path.resolve(args.shortcut) : existingAccount?.shortcutPath,
+    profileDir: args['profile-dir'] || shortcut?.profileDir || existingAccount?.profileDir,
+    profileName: args['profile-name'] || shortcut?.profileName || existingAccount?.profileName || 'Default',
+    cdpPort: Number(args['cdp-port'] || existingAccount?.cdpPort || 9333),
   };
   const binding = {
     schemaVersion: 1,
@@ -123,8 +127,8 @@ async function main() {
   };
   normalizeFanqieBinding({ ...binding, ...account });
   const output = { ...raw, fanqie: binding };
-  const registry = await readAccountRegistry();
   const registryOutput = {
+    ...registry.raw,
     schemaVersion: 1,
     accounts: { ...(registry.raw.accounts || {}), [accountRef]: account },
   };

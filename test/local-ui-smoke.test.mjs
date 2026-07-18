@@ -36,6 +36,7 @@ test('local UI serves the Fanqie dashboard and local-only status API', { timeout
   const port = await availablePort();
   const project = await fs.mkdtemp(path.join(os.tmpdir(), 'xxsbooks-ui-'));
   const profileDir = path.join(project, 'profile');
+  await fs.mkdir(profileDir, { recursive: true });
   await fs.mkdir(path.join(project, 'config', 'books'), { recursive: true });
   await fs.mkdir(path.join(project, 'config', 'local'), { recursive: true });
   await fs.mkdir(path.join(project, '书籍', '测试书', '正文'), { recursive: true });
@@ -58,6 +59,7 @@ test('local UI serves the Fanqie dashboard and local-only status API', { timeout
     assert.equal((await page.text()).includes('id="tab-fanqie"'), true);
     const status = await (await fetch(`http://127.0.0.1:${port}/api/fanqie/local-status`)).json();
     assert.equal(status.ok, true);
+    assert.equal(status.accountRegistry.count, 1);
     assert.equal(status.books.length, 1);
   } finally {
     if (child.exitCode == null) child.kill();

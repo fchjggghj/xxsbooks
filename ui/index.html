@@ -25,6 +25,7 @@
       <button class="tab tab-active" role="tab" aria-selected="true" data-tab="overview">概览</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="control">队列控制</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="fanqie">番茄发布</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="materials">素材库</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="books">书籍管理</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="config">配置</button>
     </nav>
@@ -307,7 +308,52 @@
         </article>
       </section>
 
-      <!-- Tab 4: 书籍管理 -->
+      <!-- Tab 4: 素材库 -->
+      <section id="tab-materials" class="tab-panel" role="tabpanel" aria-label="素材库" hidden>
+        <section class="workspace-grid">
+          <article class="card">
+            <div class="section-heading">
+              <div><p class="card-kicker">本机只读源</p><h2>素材索引</h2></div>
+              <span id="material-state" class="status-pill status-neutral">尚未读取</span>
+            </div>
+            <p class="muted">外部素材正文保持原位；项目只保存文件名、路径、大小和标签索引。</p>
+            <div class="button-row">
+              <button id="material-refresh" class="button button-secondary" type="button">刷新状态</button>
+              <button id="material-index" class="button button-primary" type="button">重建索引</button>
+            </div>
+            <pre id="material-status-output" class="output-box" tabindex="0">尚未读取素材源。</pre>
+          </article>
+
+          <article class="card">
+            <div class="section-heading">
+              <div><p class="card-kicker">按文件名与标签</p><h2>搜索与选择性导入</h2></div>
+              <span id="material-action-state" class="muted" role="status">等待操作</span>
+            </div>
+            <div class="form-row">
+              <label for="material-query">关键词</label>
+              <input id="material-query" type="search" placeholder="例如 快穿 反派">
+            </div>
+            <div class="button-row">
+              <button id="material-search" class="button button-secondary" type="button">搜索</button>
+            </div>
+            <div class="form-row">
+              <label for="material-results">匹配文件</label>
+              <select id="material-results" size="8" aria-label="素材搜索结果"></select>
+            </div>
+            <div class="form-row">
+              <label for="material-book">导入到书籍</label>
+              <select id="material-book"></select>
+            </div>
+            <div class="button-row">
+              <button id="material-import-preview" class="button button-secondary" type="button">预览导入</button>
+              <button id="material-import-apply" class="button button-danger" type="button">复制所选素材</button>
+            </div>
+            <pre id="material-search-output" class="output-box" tabindex="0">输入关键词后搜索。</pre>
+          </article>
+        </section>
+      </section>
+
+      <!-- Tab 5: 书籍管理 -->
       <section id="tab-books" class="tab-panel" role="tabpanel" aria-label="书籍管理" hidden>
         <article class="card books-list-card">
           <div class="section-heading">
@@ -387,7 +433,7 @@
         </article>
       </section>
 
-      <!-- Tab 5: 配置 -->
+      <!-- Tab 6: 配置 -->
       <section id="tab-config" class="tab-panel" role="tabpanel" aria-label="配置" hidden>
         <article class="card config-card">
           <div class="section-heading">

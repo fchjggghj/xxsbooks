@@ -17,6 +17,8 @@ import { assertSafePathSegment, resolveInside } from './lib/path-safety.mjs';
 import { loadBookCatalog, settingsForBook } from './lib/book-catalog.mjs';
 import { createControlStatusRuntime } from './lib/control/status.mjs';
 import { runFanqieControl } from './fanqie-control.mjs';
+import { runMaterialControl } from './material-control.mjs';
+import { runExternalResourceImport } from './scripts/import-external-resources.mjs';
 
 const projectRoot = path.resolve(
   process.env.XXSBOOKS_PROJECT_ROOT || path.dirname(fileURLToPath(import.meta.url)),
@@ -40,6 +42,8 @@ Usage:
   node control.mjs progress [--json]
   node control.mjs normalize <书名> [卷名] [--apply] [--json]
   node control.mjs fanqie <local-status|chrome|status|upload|reconcile> [...番茄参数]
+  node control.mjs resources import --fanqie-root <目录> --material-root <目录> [--apply] [--json]
+  node control.mjs material <local-status|index|search|import> [...素材参数]
 
 status and reconcile without --apply are read-only. start/resume run in the background.
 --limit N: 本次运行最多处理 N 个 pending 任务（全局顺序截断）。
@@ -750,6 +754,21 @@ async function main() {
   const rawArgs = process.argv.slice(2);
   if (rawArgs[0] === 'fanqie') {
     const result = await runFanqieControl(rawArgs.slice(1), projectRoot);
+    if (result.help) console.log(result.help);
+    else printResult(result, rawArgs.includes('--json'));
+    return;
+  }
+  if (rawArgs[0] === 'material') {
+    const result = await runMaterialControl(rawArgs.slice(1), projectRoot);
+    if (result.help) console.log(result.help);
+    else printResult(result, rawArgs.includes('--json'));
+    return;
+  }
+  if (rawArgs[0] === 'resources') {
+    if (rawArgs[1] !== 'import' && !rawArgs.includes('--help') && !rawArgs.includes('-h')) {
+      throw new Error('resources 当前仅支持 import。');
+    }
+    const result = await runExternalResourceImport(rawArgs[1] === 'import' ? rawArgs.slice(2) : rawArgs.slice(1), projectRoot);
     if (result.help) console.log(result.help);
     else printResult(result, rawArgs.includes('--json'));
     return;

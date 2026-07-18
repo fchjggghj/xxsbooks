@@ -6,6 +6,7 @@ import process from 'node:process';
 import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { assertSafePathSegment, resolveInside } from './lib/path-safety.mjs';
+import { runMaterialControl } from './material-control.mjs';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 3210;
@@ -493,6 +494,38 @@ async function fanqieLocalStatus(book = '') {
   return runNodeScript(fanqieControlFile, args, 30_000, { expectJson: true });
 }
 
+async function materialCommand(args) {
+  return runMaterialControl(args, projectRoot);
+}
+
+async function handleMaterialIndex(req, res) {
+  if (!isSameOriginWrite(req, handleMaterialIndex.port)) throw new HttpError(403, '拒绝非同源写请求。');
+  await readJsonBody(req);
+  acquireWriteLock();
+  try {
+    sendJson(res, 200, await materialCommand(['index', '--apply']));
+  } finally {
+    releaseWriteLock();
+  }
+}
+
+async function handleMaterialImport(req, res) {
+  if (!isSameOriginWrite(req, handleMaterialImport.port)) throw new HttpError(403, '拒绝非同源写请求。');
+  const body = await readJsonBody(req);
+  const sourceId = String(body.sourceId || 'main').trim();
+  const relativePath = String(body.relativePath || '').trim();
+  const book = String(body.book || '').trim();
+  if (!relativePath || !book) throw new HttpError(400, '请选择素材文件和目标书籍。');
+  const args = ['import', '--source', sourceId, '--file', relativePath, '--book', book];
+  if (body.apply === true) args.push('--apply');
+  acquireWriteLock();
+  try {
+    sendJson(res, 200, await materialCommand(args));
+  } finally {
+    releaseWriteLock();
+  }
+}
+
 async function handleFanqieChrome(req, res) {
   if (!isSameOriginWrite(req, handleFanqieChrome.port)) throw new HttpError(403, '拒绝非同源写请求。');
   const body = await readJsonBody(req);
@@ -693,6 +726,8 @@ function createServer(port) {
   handleChrome.port = port;
   handleFanqieChrome.port = port;
   handleFanqieCommand.port = port;
+  handleMaterialIndex.port = port;
+  handleMaterialImport.port = port;
   saveConfig.port = port;
 
   return http.createServer(async (req, res) => {
@@ -724,6 +759,16 @@ function createServer(port) {
       }
       if (method === 'GET' && pathname === '/api/fanqie/local-status') {
         sendJson(res, 200, await fanqieLocalStatus(url.searchParams.get('book') || ''));
+        return;
+      }
+      if (method === 'GET' && pathname === '/api/material/local-status') {
+        sendJson(res, 200, await materialCommand(['local-status']));
+        return;
+      }
+      if (method === 'GET' && pathname === '/api/material/search') {
+        const query = url.searchParams.get('query') || '';
+        const limit = url.searchParams.get('limit') || '50';
+        sendJson(res, 200, await materialCommand(['search', '--query', query, '--limit', limit]));
         return;
       }
       if (method === 'GET' && pathname === '/api/config') {
@@ -779,6 +824,14 @@ function createServer(port) {
       }
       if (method === 'POST' && pathname === '/api/fanqie/reconcile') {
         await handleFanqieCommand(req, res, 'reconcile');
+        return;
+      }
+      if (method === 'POST' && pathname === '/api/material/index') {
+        await handleMaterialIndex(req, res);
+        return;
+      }
+      if (method === 'POST' && pathname === '/api/material/import') {
+        await handleMaterialImport(req, res);
         return;
       }
       if (method === 'POST' && pathname === '/api/config') {
