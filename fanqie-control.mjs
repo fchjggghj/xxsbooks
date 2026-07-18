@@ -6,6 +6,7 @@ import { loadFanqieBook } from './lib/fanqie-config.mjs';
 import {
   getFanqieLocalStatus,
   resolveFanqieBookName,
+  runFanqieMarketing,
   runFanqieReconcile,
   runFanqieRemoteStatus,
   runFanqieUpload,
@@ -20,10 +21,11 @@ function usage() {
   node fanqie-control.mjs local-status [--book "书名"]
   node fanqie-control.mjs chrome [--book "书名"]
   node fanqie-control.mjs status [--book "书名"] [--from N] [--to N]
+  node fanqie-control.mjs marketing [--book "书名"] [--apply]
   node fanqie-control.mjs upload [--book "书名"] [--from N] [--to N] [--apply]
   node fanqie-control.mjs reconcile [--book "书名"] [--apply]
 
-local-status 完全本地；status、reconcile 预览和不带 --apply 的 upload 都不会发布。`;
+local-status 完全本地；marketing、reconcile 和 upload 不带 --apply 时都只预览，不修改番茄后台。`;
 }
 
 export function parseFanqieControlArgs(argv) {
@@ -72,6 +74,8 @@ export async function runFanqieControl(argv, root = projectRoot) {
   } else if (args.command === 'status') {
     if (args.apply) throw new Error('status 不接受 --apply；请使用 upload --apply');
     result = await runFanqieRemoteStatus(root, args);
+  } else if (args.command === 'marketing') {
+    result = await runFanqieMarketing(root, args);
   } else if (args.command === 'upload') {
     result = await runFanqieUpload(root, {
       ...args,

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  alignCampaignAccounts,
   bootstrapCampaign,
   campaignCycles,
   campaignStatus,
@@ -88,6 +89,28 @@ test('bootstrap assigns six unique initialized accounts and derives pipeline gat
     assert.equal(status.lanes[0].phase, 'ready_to_publish');
     assert.equal(status.lanes.slice(1).every((lane) => lane.phase === 'awaiting_fanqie_binding'), true);
     assert.equal(status.lanes.every((lane) => lane.pipeline.xie.complete), true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('campaign account alignment previews and repairs lane bindings from book configs', async () => {
+  const root = await makeFixture();
+  try {
+    await bootstrapCampaign(root, { month: '2026-07', cycle: 2, apply: true });
+    const bookFile = path.join(root, 'config', 'books', '002.json');
+    const book = JSON.parse(await fs.readFile(bookFile, 'utf8'));
+    book.fanqie = { enabled: true, accountRef: 'account-2', workId: '10002', workTitle: book.name };
+    await fs.writeFile(bookFile, JSON.stringify(book));
+    const stateFile = path.join(root, '书籍', '.state', 'campaign', 'state.json');
+    const state = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+    state.lanes['2'].accountRef = 'account-6';
+    await fs.writeFile(stateFile, JSON.stringify(state));
+    const preview = await alignCampaignAccounts(root, {});
+    assert.deepEqual(preview.changes, [{ lane: 2, book: '测试书2', from: 'account-6', to: 'account-2' }]);
+    assert.equal((await loadCampaignState(root)).state.lanes['2'].accountRef, 'account-6');
+    await alignCampaignAccounts(root, { apply: true });
+    assert.equal((await loadCampaignState(root)).state.lanes['2'].accountRef, 'account-2');
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

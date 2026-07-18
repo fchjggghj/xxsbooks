@@ -63,6 +63,7 @@ test('discovers continuous chapter files and strips the numbered title prefix', 
     await fs.mkdir(source);
     await fs.writeFile(path.join(source, '0001.md'), '第一章第一天\n\n正文一', 'utf8');
     await fs.writeFile(path.join(source, '0002.md'), '第2章 第二天\n\n正文二', 'utf8');
+    await fs.writeFile(path.join(source, '番茄书籍信息.md'), '# 番茄书籍信息\n\n不是章节', 'utf8');
     const chapters = await discoverFanqieChapters(root, { sourceDir: '正文' });
     assert.deepEqual(chapters.map(({ chapterNumber, title }) => ({ chapterNumber, title })), [
       { chapterNumber: 1, title: '第一天' },

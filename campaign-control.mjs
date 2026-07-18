@@ -3,6 +3,7 @@ import process from 'node:process';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  alignCampaignAccounts,
   bootstrapCampaign,
   campaignStatus,
   decideCampaignLane,
@@ -19,6 +20,7 @@ export function campaignUsage() {
   node control.mjs campaign status [--json]
   node control.mjs campaign tick [--apply] [--publish] [--json]
   node control.mjs campaign bootstrap [--month YYYY-MM --cycle 1|2|3] [--apply] [--json]
+  node control.mjs campaign align-accounts [--apply] [--json]
   node control.mjs campaign enroll --lane N --source main --file <素材相对路径> --book <新书名> [--apply]
   node control.mjs campaign metrics --lane N --readers N --read-through-rate N [--followers N --revenue-cny N --comments N --note 文本] [--apply]
   node control.mjs campaign decide --lane N --decision <continue|replace> --reason <原因> [--override] [--apply]
@@ -106,6 +108,7 @@ export async function runCampaignControl(argv, projectRoot) {
   if (options.command === 'status') return campaignStatus(projectRoot, options);
   if (options.command === 'tick') return runCampaignTick(projectRoot, options);
   if (options.command === 'bootstrap') return bootstrapCampaign(projectRoot, options);
+  if (options.command === 'align-accounts') return alignCampaignAccounts(projectRoot, options);
   if (options.command === 'enroll') return enrollCampaignBook(projectRoot, options);
   if (options.command === 'metrics') return recordCampaignMetrics(projectRoot, options);
   if (options.command === 'decide') return decideCampaignLane(projectRoot, options);

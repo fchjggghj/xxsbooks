@@ -29,3 +29,6 @@ stress-test-data/
 
 # 启动日志
 logs/
+
+# 榜单截图与浏览器核验截图只作本机证据，不提交仓库
+research/

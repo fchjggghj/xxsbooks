@@ -60,6 +60,32 @@ npm run fanqie:reconcile -- --apply
 
 新建作品默认参加当前可用征文，书籍绑定以 `contestParticipation: true` 记录该选择。AI 声明不跟随征文默认值：每本书必须根据实际创作过程明确设置 `aiUsed`，GPTS 流程产出的正文应设为 `true`。
 
+## 封面、简介和标签
+
+六本书的中央营销资料位于 `config/fanqie-marketing.json`。它同时绑定本地书名、账号引用、作品 ID、后台书名、作者名、封面、主角、分类标签和简介；账号、作品 ID 或后台书名任一不匹配时，远端修改会停止。
+
+先预览单本修改：
+
+```powershell
+npm run fanqie:marketing -- --book "书名"
+```
+
+确认后才应用到绑定账号：
+
+```powershell
+npm run fanqie:marketing -- --book "书名" --apply
+```
+
+作品资料修改同样使用账号级发布锁。提交前会逐项回读标签、主角名和简介，并保存编辑页证据。提交后有两种成功状态：`visible` 表示新资料已经显示；`pending_review` 表示平台已锁定“修改”按钮或出现成功提示，资料正在审核。审核锁定期间不得重复提交。
+
+把封面和书籍信息复制到每本书的 `正文` 目录：
+
+```powershell
+npm run fanqie:marketing-sync
+```
+
+该命令只写入 `番茄封面.png` 和 `番茄书籍信息.md`，不会改写章节文件。
+
 ## 首次绑定
 
 绑定命令默认只打印预览，不修改配置。它可以从已有 `.lnk` 快捷方式读取 `--user-data-dir` 和 `--profile-directory`：
