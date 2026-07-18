@@ -44,12 +44,19 @@ test('calculates four chapters per publishing day', () => {
   assert.deepEqual(calculateFanqiePublishAt(61, schedule), { date: '2026-08-02', time: '00:00' });
 });
 
+test('spreads four daily chapters across configured time slots', () => {
+  const staggered = { ...schedule, times: ['08:00', '12:00', '18:00', '21:00'] };
+  assert.deepEqual(calculateFanqiePublishAt(5, staggered), { date: '2026-07-19', time: '08:00' });
+  assert.deepEqual(calculateFanqiePublishAt(8, staggered), { date: '2026-07-19', time: '21:00' });
+  assert.deepEqual(calculateFanqiePublishAt(9, staggered), { date: '2026-07-20', time: '08:00' });
+});
+
 test('discovers continuous chapter files and strips the numbered title prefix', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'fanqie-book-'));
   try {
     const source = path.join(root, '正文');
     await fs.mkdir(source);
-    await fs.writeFile(path.join(source, '0001.md'), '第1章 第一天\n\n正文一', 'utf8');
+    await fs.writeFile(path.join(source, '0001.md'), '第一章第一天\n\n正文一', 'utf8');
     await fs.writeFile(path.join(source, '0002.md'), '第2章 第二天\n\n正文二', 'utf8');
     const chapters = await discoverFanqieChapters(root, { sourceDir: '正文' });
     assert.deepEqual(chapters.map(({ chapterNumber, title }) => ({ chapterNumber, title })), [
@@ -67,7 +74,11 @@ test('upload planning refuses mismatches, gaps, and missing scheduled predecesso
   assert.throws(() => createFanqieUploadPlan(local, [], { from: 2 }), /不能跳过/);
   assert.throws(() => createFanqieUploadPlan(local, local.slice(0, 3), { minimumRemoteCount: 4 }), /排期从第 5 章开始/);
   assert.deepEqual(createFanqieUploadPlan(local, local.slice(0, 4), { minimumRemoteCount: 4 }).map((item) => item.chapterNumber), [5]);
+  assert.deepEqual(createFanqieUploadPlan(local, [], { knownRemoteCount: 1 }).map((item) => item.chapterNumber), [2, 3, 4, 5]);
+  assert.deepEqual(createFanqieUploadPlan(local, local), []);
+  assert.throws(() => createFanqieUploadPlan(local, [], { knownRemoteCount: 6 }), /有效的本地章节前缀/);
   assert.equal(normalizeChapterTitle('第 5 章 标题5'), '标题5');
+  assert.equal(normalizeChapterTitle('第一十章自闭天才少年（一十）'), '自闭天才少年（一十）');
 });
 
 test('parses Chrome profile arguments from a shortcut', () => {

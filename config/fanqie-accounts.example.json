@@ -6,7 +6,9 @@
       "shortcutPath": "C:\\path\\to\\account.lnk",
       "profileDir": "C:\\path\\to\\chrome-profile",
       "profileName": "Default",
-      "cdpPort": 9333
+      "cdpPort": 9333,
+      "publishingEnabled": true,
+      "status": "active"
     }
   }
 }

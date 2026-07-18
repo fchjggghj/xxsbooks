@@ -11,7 +11,8 @@ function usage() {
 
 node scripts/bind-fanqie.mjs --book "书名" --account-ref fanqie-02 \\
   --work-id 123 --work-title "番茄书名" --ai-used true \\
-  --first-chapter 5 --first-date 2026-07-19 --chapters-per-day 4 --time 00:00 [--apply]
+  --first-chapter 5 --first-date 2026-07-19 --chapters-per-day 4 \\
+  --times 08:00,12:00,18:00,21:00 [--apply]
 
 accountRef 已在 config/local/fanqie-accounts.json 中登记时，无需重复提供 Profile。
 新账号也可用 --shortcut，或用 --profile-dir 绝对路径 [--profile-name Default]。`;
@@ -122,7 +123,8 @@ async function main() {
       firstChapter: Number(args['first-chapter'] || 1),
       firstDate: required(args, 'first-date'),
       chaptersPerDay: Number(args['chapters-per-day'] || 1),
-      time: args.time || '00:00',
+      time: (args.times ? args.times.split(',')[0] : args.time) || '00:00',
+      ...(args.times ? { times: args.times.split(',').map((item) => item.trim()).filter(Boolean) } : {}),
     },
   };
   normalizeFanqieBinding({ ...binding, ...account });

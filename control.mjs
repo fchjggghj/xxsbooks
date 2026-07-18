@@ -776,7 +776,7 @@ async function main() {
     const result = await runFanqieControl(rawArgs.slice(1), projectRoot);
     if (result.help) console.log(result.help);
     else printResult(result, rawArgs.includes('--json'));
-    return;
+    process.exit(0);
   }
   if (rawArgs[0] === 'material') {
     const result = await runMaterialControl(rawArgs.slice(1), projectRoot);
@@ -837,5 +837,6 @@ main().catch((err) => {
   const message = err instanceof Error ? err.message : String(err);
   if (json) console.error(JSON.stringify({ ok: false, error: message }, null, 2));
   else console.error(`ERROR: ${message}`);
+  if (process.argv[2] === 'fanqie') process.exit(1);
   process.exitCode = 1;
 });

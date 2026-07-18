@@ -21,6 +21,11 @@ test('offline Fanqie page fixtures satisfy the expected UI contracts', async () 
   ]);
 });
 
+test('a brand-new work with only the create button is a valid empty manager', () => {
+  const html = '<main><button>新建章节</button></main>';
+  assert.deepEqual(validateFanqiePageContractHtml(html, 'manager').missing, []);
+});
+
 test('chapter manager fixture extracts remote identity and status', async () => {
   const rows = parseFanqieManagerFixture(await fixture('chapter-manager.html'));
   assert.equal(rows.length, 2);

@@ -1,1 +1,48 @@
-{"name":"快穿_偏执反派在我怀里奶唧唧","enabled":true,"stages":{"chai":{"enabled":true,"chapterRange":{"start":1,"end":60}},"xie":{"enabled":true,"chapterRange":{"start":1,"end":60}}}}
+{
+  "name": "快穿_偏执反派在我怀里奶唧唧",
+  "enabled": true,
+  "stages": {
+    "chai": {
+      "enabled": true,
+      "chapterRange": {
+        "start": 1,
+        "end": 60
+      }
+    },
+    "xie": {
+      "enabled": true,
+      "chapterRange": {
+        "start": 1,
+        "end": 60
+      }
+    }
+  },
+  "fanqie": {
+    "schemaVersion": 1,
+    "enabled": true,
+    "accountRef": "fanqie-02",
+    "workId": "7663913655527820313",
+    "workTitle": "快穿：大佬她专治偏执反派",
+    "sourceDir": "正文",
+    "aiUsed": true,
+    "contentDetection": "basic",
+    "quality": {
+      "minBodyChars": 1000,
+      "maxBodyChars": 30000,
+      "maxTitleChars": 30,
+      "minimumLeadMinutes": 15
+    },
+    "schedule": {
+      "firstChapter": 1,
+      "firstDate": "2026-07-20",
+      "chaptersPerDay": 4,
+      "time": "08:00",
+      "times": [
+        "08:00",
+        "12:00",
+        "18:00",
+        "21:00"
+      ]
+    }
+  }
+}
