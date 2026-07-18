@@ -3,7 +3,7 @@ import fssync from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   acquireQueueLock,
@@ -15,6 +15,8 @@ import { inspectChatGptSession } from './lib/chatgpt-session.mjs';
 import { extractFileOrder, sortVolumeNames } from './lib/naming.mjs';
 import { assertSafePathSegment, resolveInside } from './lib/path-safety.mjs';
 import { loadBookCatalog, settingsForBook } from './lib/book-catalog.mjs';
+import { createControlStatusRuntime } from './lib/control/status.mjs';
+import { runFanqieControl } from './fanqie-control.mjs';
 
 const projectRoot = path.resolve(
   process.env.XXSBOOKS_PROJECT_ROOT || path.dirname(fileURLToPath(import.meta.url)),
@@ -23,6 +25,7 @@ const STAGES = {
   chai: 'config-chai.json',
   xie: 'config-xie.json',
 };
+const statusRuntime = createControlStatusRuntime(projectRoot, STAGES);
 
 function usage() {
   return `XXSBooks control
@@ -36,6 +39,7 @@ Usage:
   node control.mjs preflight [--json]
   node control.mjs progress [--json]
   node control.mjs normalize <书名> [卷名] [--apply] [--json]
+  node control.mjs fanqie <local-status|chrome|status|upload|reconcile> [...番茄参数]
 
 status and reconcile without --apply are read-only. start/resume run in the background.
 --limit N: 本次运行最多处理 N 个 pending 任务（全局顺序截断）。
@@ -81,139 +85,27 @@ function requireStage(value, allowAll = false) {
 }
 
 function resolveFromRoot(value) {
-  return path.isAbsolute(value) ? value : path.resolve(projectRoot, value);
+  return statusRuntime.resolveFromRoot(value);
 }
 
 async function readJson(file) {
-  return JSON.parse((await fs.readFile(file, 'utf8')).replace(/^\uFEFF/, ''));
+  return statusRuntime.readJson(file);
 }
 
 async function loadStage(stage) {
-  const configPath = path.join(projectRoot, STAGES[stage]);
-  const cfg = await readJson(configPath);
-  const statePath = resolveFromRoot(cfg.stateFile || path.join(cfg.outputDir, 'state.json'));
-  const logPath = resolveFromRoot(cfg.logFile || path.join(cfg.outputDir, 'run.log'));
-  let state = null;
-  try {
-    state = await readJson(statePath);
-  } catch (err) {
-    if (err?.code !== 'ENOENT') throw err;
-  }
-  return { stage, cfg, configPath, statePath, logPath, state };
+  return statusRuntime.loadStage(stage);
 }
 
 function taskOutputPath(task) {
-  if (!task?.outputFile) return null;
-  return resolveFromRoot(task.outputFile);
-}
-
-function summarizeStage(loaded) {
-  const tasks = Object.values(loaded.state?.tasks || {});
-  const counts = { done: 0, failed: 0, pending: 0, running: 0, other: 0 };
-  const missingOutputs = [];
-  const outputsNotMarkedDone = [];
-
-  for (const task of tasks) {
-    const key = Object.hasOwn(counts, task.status) ? task.status : 'other';
-    counts[key]++;
-    const outputPath = taskOutputPath(task);
-    const outputExists = Boolean(outputPath && fssync.existsSync(outputPath));
-    if (task.status === 'done' && !outputExists) missingOutputs.push(task.id);
-    if (task.status !== 'done' && outputExists) outputsNotMarkedDone.push(task.id);
-  }
-
-  const unfinished = counts.failed + counts.pending + counts.running + counts.other + missingOutputs.length;
-  return {
-    stage: loaded.stage,
-    stateFile: path.relative(projectRoot, loaded.statePath),
-    logFile: path.relative(projectRoot, loaded.logPath),
-    stateExists: Boolean(loaded.state),
-    taskCount: tasks.length,
-    counts,
-    currentTaskId: loaded.state?.currentTaskId || null,
-    currentNovelKey: loaded.state?.currentNovelKey || null,
-    lastError:
-      tasks.find((task) => task.id === loaded.state?.currentTaskId)?.lastError ||
-      tasks.find((task) => task.status === 'failed')?.lastError ||
-      '',
-    missingOutputs,
-    outputsNotMarkedDone,
-    complete: tasks.length > 0 && unfinished === 0,
-  };
-}
-
-function listQueueProcesses() {
-  try {
-    if (process.platform === 'win32') {
-      const script = [
-        "$items = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match 'gpts-queue\\.mjs' } | Select-Object @{n='pid';e={$_.ProcessId}}, @{n='commandLine';e={$_.CommandLine}}",
-        'if ($items) { $items | ConvertTo-Json -Compress }',
-      ].join('; ');
-      const result = spawnSync('powershell.exe', ['-NoProfile', '-Command', script], {
-        encoding: 'utf8',
-        windowsHide: true,
-        timeout: 5000,
-      });
-      if (result.status !== 0 || !result.stdout.trim()) return [];
-      const parsed = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim());
-      return (Array.isArray(parsed) ? parsed : [parsed]).map((item) => ({
-        pid: Number(item.pid),
-        commandLine: String(item.commandLine || ''),
-      }));
-    }
-
-    const result = spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 5000 });
-    if (result.status !== 0) return [];
-    return result.stdout
-      .split(/\r?\n/)
-      .filter((line) => line.includes('gpts-queue.mjs'))
-      .map((line) => {
-        const match = line.trim().match(/^(\d+)\s+(.+)$/);
-        return match ? { pid: Number(match[1]), commandLine: match[2] } : null;
-      })
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
+  return statusRuntime.taskOutputPath(task);
 }
 
 async function cdpStatus() {
-  const cfg = await readJson(path.join(projectRoot, STAGES.chai));
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1200);
-  try {
-    const response = await fetch(`${String(cfg.cdpUrl).replace(/\/$/, '')}/json/version`, {
-      signal: controller.signal,
-    });
-    return { url: cfg.cdpUrl, ready: response.ok };
-  } catch {
-    return { url: cfg.cdpUrl, ready: false };
-  } finally {
-    clearTimeout(timer);
-  }
+  return statusRuntime.cdpStatus();
 }
 
 async function buildStatus(stage = 'all') {
-  const selected = stage === 'all' ? Object.keys(STAGES) : [stage];
-  const loaded = await Promise.all(selected.map(loadStage));
-  const lock = await readQueueLock(projectRoot);
-  const processes = listQueueProcesses();
-  return {
-    ok: true,
-    command: 'status',
-    checkedAt: new Date().toISOString(),
-    readOnly: true,
-    cdp: await cdpStatus(),
-    lock: {
-      path: path.relative(projectRoot, lock.path),
-      exists: lock.exists,
-      active: lock.active,
-      stale: lock.stale,
-      info: lock.info,
-    },
-    processes,
-    stages: Object.fromEntries(loaded.map((item) => [item.stage, summarizeStage(item)])),
-  };
+  return statusRuntime.buildStatus(stage);
 }
 
 function ensureIdle(status) {
@@ -717,6 +609,29 @@ async function preflight() {
   const lock = await readQueueLock(projectRoot);
   checks.push({ name: '队列锁', ok: !lock.active, detail: lock.active ? `占用中 PID ${lock.info?.pid}` : '空闲' });
 
+  // 7. 番茄仅做本地预检；不启动或访问番茄浏览器。
+  try {
+    const fanqie = await runFanqieControl(['local-status'], projectRoot);
+    checks.push({
+      name: '番茄账号绑定隔离', ok: fanqie.assignments.ok,
+      detail: fanqie.assignments.ok ? `${fanqie.assignments.assignments.length} 个绑定无端口/Profile 冲突` : fanqie.assignments.errors.map((item) => item.detail).join('；'),
+    });
+    checks.push({
+      name: '番茄发布锁', ok: !fanqie.lock.active,
+      detail: fanqie.lock.active ? `占用中 PID ${fanqie.lock.info?.pid || '未知'}` : fanqie.lock.stale ? '存在陈旧锁，请核对进程' : '空闲',
+    });
+    for (const item of fanqie.books) {
+      checks.push({
+        name: `${item.book} 番茄正文质量`, ok: Boolean(item.quality?.ok) && !item.error,
+        detail: item.error || (item.quality?.ok
+          ? `${item.localChapterCount} 章，${item.quality.stats.minBodyChars}-${item.quality.stats.maxBodyChars} 字`
+          : item.quality?.errors?.map((issue) => `第${issue.chapterNumber}章 ${issue.detail}`).join('；') || '质量检查失败'),
+      });
+    }
+  } catch (error) {
+    checks.push({ name: '番茄本地配置', ok: false, detail: error.message });
+  }
+
   const allOk = checks.every((c) => c.ok);
   return { ok: allOk, command: 'preflight', checks, summary: `${checks.filter((c) => c.ok).length}/${checks.length} 通过` };
 }
@@ -832,7 +747,14 @@ async function normalizeBook(bookName, volumeName, apply = false) {
 }
 
 async function main() {
-  const { positional, options } = parseArgs(process.argv.slice(2));
+  const rawArgs = process.argv.slice(2);
+  if (rawArgs[0] === 'fanqie') {
+    const result = await runFanqieControl(rawArgs.slice(1), projectRoot);
+    if (result.help) console.log(result.help);
+    else printResult(result, rawArgs.includes('--json'));
+    return;
+  }
+  const { positional, options } = parseArgs(rawArgs);
   const command = positional[0] || 'help';
   if (options.help || command === 'help') {
     console.log(usage());

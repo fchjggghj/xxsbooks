@@ -9,6 +9,23 @@ node control.mjs start chai --book "书名"
 node control.mjs start xie --book "书名"
 ```
 
+正文完成后可把每本书绑定到独立的本地 Chrome 番茄登录态。番茄发布默认只预览，完整说明见 [docs/FANQIE_PUBLISH.md](docs/FANQIE_PUBLISH.md)：
+
+```powershell
+npm run fanqie:chrome
+npm run fanqie:status
+npm run fanqie:upload             # 只预览
+npm run fanqie:upload -- --apply  # 明确确认后才发布
+```
+
+本地控制台也已提供番茄专区：
+
+```powershell
+npm run ui
+```
+
+账号的真实 Profile 路径放在被 Git 忽略的 `config/local/fanqie-accounts.json`；书籍配置只保存可迁移的 `accountRef`。发布过程带逐章持久化状态、质量门禁、reconcile 和失败截图留证。
+
 写正文时，章节标题固定取同章 `原文` 文件首行；提示词和落盘阶段都会校验，GPT不能自行改题。
 
 这是一个本地批量队列工具，用 Chrome 自动化把小说章节发送给 ChatGPT GPTS，并把回复保存到本地文件。

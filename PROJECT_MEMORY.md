@@ -69,6 +69,10 @@ C:\chrome-automation
 
 `C:\chrome-automation` 是持久登录资料目录。不要随意删除它，否则需要重新登录 ChatGPT。
 
+番茄发布使用另一套“每书作品绑定 + 本机账号注册表”。书籍配置只保存 `accountRef`、作品 ID、排期和质量规则；真实 Profile/CDP 配置位于被忽略的 `config/local/fanqie-accounts.json`。它不与 ChatGPT 的 `C:\chrome-automation` 混用。`fanqie-control.mjs` 默认只预览；只有 `upload --apply` 发布，且发布前必须逐章核对远端已有标题、通过质量与排期门禁并持有独立发布锁。
+
+番茄逐章状态位于 `书籍/.state/fanqie/<作品ID>/state.json`，阶段为 planned/editing/submitting/submitted/confirmed/failed。异常页面自动保存 screenshot/HTML/JSON；`reconcile` 默认只预览，存在不确定提交时拒绝自动应用。
+
 ## 关键文件
 
 - `gpts-queue.mjs`：队列状态机和 ChatGPT 页面自动化。
@@ -81,6 +85,10 @@ C:\chrome-automation
 - `lib/chapter-title.mjs`：从原文读取并强制保留章节原题。
 - `lib/conversation-registry.mjs`：会话地址归属校验。
 - `scripts/`：可预览、可审计的维护操作；默认不写入。
+- `fanqie-control.mjs`：启动绑定 Profile、检查番茄远端章节并按排期失败即停地发布。
+- `lib/fanqie-*.mjs`：番茄绑定、章节计划、浏览器操作与独立发布锁。
+- `lib/queue/config.mjs`：队列参数与配置加载；`lib/control/status.mjs`：控制器只读状态汇总。入口文件只负责流程编排。
+- `ui/` 与 `local-ui.mjs`：本机控制台；番茄页只在用户点击时访问远端，发布需要确认短语和二次弹窗。
 - `README.md`：给使用者看的说明书。
 - `PROJECT_MEMORY.md`：给维护者和后续自动化助手看的项目记忆。
 

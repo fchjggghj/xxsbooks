@@ -1,1 +1,36 @@
-{"name":"反派只想学习［快穿］","enabled":true,"stages":{"chai":{"enabled":true,"chapterRange":{"start":1,"end":60}},"xie":{"enabled":true,"chapterRange":{"start":1,"end":60}}}}
+{
+  "name": "反派只想学习［快穿］",
+  "enabled": true,
+  "stages": {
+    "chai": {
+      "enabled": true,
+      "chapterRange": { "start": 1, "end": 60 }
+    },
+    "xie": {
+      "enabled": true,
+      "chapterRange": { "start": 1, "end": 60 }
+    }
+  },
+  "fanqie": {
+    "schemaVersion": 1,
+    "enabled": true,
+    "accountRef": "zhanghao-01",
+    "workId": "7663866009652055065",
+    "workTitle": "快穿：反派的满级学习系统",
+    "sourceDir": "正文",
+    "aiUsed": true,
+    "contentDetection": "basic",
+    "quality": {
+      "minBodyChars": 1000,
+      "maxBodyChars": 30000,
+      "maxTitleChars": 30,
+      "minimumLeadMinutes": 15
+    },
+    "schedule": {
+      "firstChapter": 5,
+      "firstDate": "2026-07-19",
+      "chaptersPerDay": 4,
+      "time": "00:00"
+    }
+  }
+}

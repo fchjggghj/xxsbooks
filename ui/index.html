@@ -24,6 +24,7 @@
     <nav class="tabs" role="tablist" aria-label="功能分区">
       <button class="tab tab-active" role="tab" aria-selected="true" data-tab="overview">概览</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="control">队列控制</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="fanqie">番茄发布</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="books">书籍管理</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="config">配置</button>
     </nav>
@@ -247,7 +248,66 @@
         </section>
       </section>
 
-      <!-- Tab 3: 书籍管理 -->
+      <!-- Tab 3: 番茄发布 -->
+      <section id="tab-fanqie" class="tab-panel" role="tabpanel" aria-label="番茄发布" hidden>
+        <section class="workspace-grid">
+          <article class="card">
+            <div class="section-heading">
+              <div><p class="card-kicker">本机绑定</p><h2>番茄账号与作品</h2></div>
+              <span id="fanqie-local-state" class="status-pill status-neutral">读取中</span>
+            </div>
+            <div class="form-row">
+              <label for="fanqie-book">书籍</label>
+              <select id="fanqie-book"></select>
+            </div>
+            <div class="button-row">
+              <button id="fanqie-refresh-local" class="button button-secondary" type="button">刷新本地状态</button>
+              <button id="fanqie-launch-chrome" class="button button-primary" type="button">启动专用 Chrome</button>
+            </div>
+            <pre id="fanqie-local-output" class="output-box" tabindex="0">正在读取本机绑定……</pre>
+          </article>
+
+          <article class="card">
+            <div class="section-heading">
+              <div><p class="card-kicker">只读核对</p><h2>远端预检</h2></div>
+              <span id="fanqie-remote-state" class="muted" role="status">尚未检查</span>
+            </div>
+            <p class="muted">只在手工点击时连接番茄后台，核对账号、作品、远端标题、正文质量和排期；不会发布。</p>
+            <div class="form-row fanqie-range-row">
+              <label for="fanqie-from">章节范围（可选）</label>
+              <div class="inline-fields">
+                <input id="fanqie-from" type="number" min="1" placeholder="从">
+                <span>到</span>
+                <input id="fanqie-to" type="number" min="1" placeholder="至">
+              </div>
+            </div>
+            <div class="button-row">
+              <button id="fanqie-remote-status" class="button button-secondary" type="button">检查远端状态</button>
+              <button id="fanqie-upload-preview" class="button button-secondary" type="button">预览上传计划</button>
+              <button id="fanqie-reconcile-preview" class="button button-secondary" type="button">预览状态回填</button>
+            </div>
+          </article>
+        </section>
+
+        <article class="card fanqie-danger-zone">
+          <div class="section-heading">
+            <div><p class="card-kicker">受保护写操作</p><h2>状态回填与正式发布</h2></div>
+            <span id="fanqie-action-state" class="muted" role="status">等待操作</span>
+          </div>
+          <p class="hint">回填状态请输入 <code>RECONCILE 书名</code>；正式发布请输入 <code>PUBLISH 书名</code>。程序还会弹出第二次确认。</p>
+          <div class="form-row">
+            <label for="fanqie-confirmation">二次确认文字</label>
+            <input id="fanqie-confirmation" type="text" autocomplete="off" placeholder="例如 PUBLISH 我的书名">
+          </div>
+          <div class="button-row">
+            <button id="fanqie-reconcile-apply" class="button button-danger" type="button">应用状态回填</button>
+            <button id="fanqie-upload-apply" class="button button-danger" type="button">确认并正式发布</button>
+          </div>
+          <pre id="fanqie-remote-output" class="output-box" tabindex="0">尚未执行远端检查。</pre>
+        </article>
+      </section>
+
+      <!-- Tab 4: 书籍管理 -->
       <section id="tab-books" class="tab-panel" role="tabpanel" aria-label="书籍管理" hidden>
         <article class="card books-list-card">
           <div class="section-heading">
@@ -327,7 +387,7 @@
         </article>
       </section>
 
-      <!-- Tab 4: 配置 -->
+      <!-- Tab 5: 配置 -->
       <section id="tab-config" class="tab-panel" role="tabpanel" aria-label="配置" hidden>
         <article class="card config-card">
           <div class="section-heading">

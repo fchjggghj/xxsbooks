@@ -10,6 +10,7 @@
   "scripts": {
     "chrome": "powershell -NoProfile -ExecutionPolicy Bypass -File ./start-chrome.ps1",
     "control": "node control.mjs",
+    "ui": "node local-ui.mjs",
     "status": "node control.mjs status --json",
     "queue:start": "node control.mjs start",
     "queue:resume": "node control.mjs resume",
@@ -31,7 +32,13 @@
     "titles:preview": "node scripts/restore-original-titles.mjs .",
     "titles:apply": "node scripts/restore-original-titles.mjs . --apply",
     "book:config": "node scripts/create-book-config.mjs",
-    "check": "node --check gpts-queue.mjs && node --check queue-lock.mjs && node --check control.mjs && node --check lib/queue-state.mjs && node --check lib/assistant-text.mjs && node --check lib/chapter-title.mjs && node --check lib/book-catalog.mjs && node --check lib/task-scope.mjs && node --check lib/conversation-registry.mjs && node --check scripts/restore-original-titles.mjs && node --check scripts/create-book-config.mjs",
+    "fanqie:chrome": "node fanqie-control.mjs chrome",
+    "fanqie:local-status": "node fanqie-control.mjs local-status",
+    "fanqie:status": "node fanqie-control.mjs status",
+    "fanqie:upload": "node fanqie-control.mjs upload",
+    "fanqie:reconcile": "node fanqie-control.mjs reconcile",
+    "fanqie:bind": "node scripts/bind-fanqie.mjs",
+    "check": "node --check gpts-queue.mjs && node --check queue-lock.mjs && node --check control.mjs && node --check local-ui.mjs && node --check ui/app.js && node --check fanqie-control.mjs && node --check lib/queue/config.mjs && node --check lib/queue/page-errors.mjs && node --check lib/control/status.mjs && node --check lib/queue-state.mjs && node --check lib/assistant-text.mjs && node --check lib/chapter-title.mjs && node --check lib/book-catalog.mjs && node --check lib/task-scope.mjs && node --check lib/conversation-registry.mjs && node --check lib/fanqie-config.mjs && node --check lib/fanqie-browser.mjs && node --check lib/fanqie-lock.mjs && node --check lib/fanqie-state.mjs && node --check lib/fanqie-evidence.mjs && node --check lib/fanqie-service.mjs && node --check lib/fanqie-page-contract.mjs && node --check scripts/restore-original-titles.mjs && node --check scripts/create-book-config.mjs && node --check scripts/bind-fanqie.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

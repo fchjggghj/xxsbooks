@@ -19,6 +19,23 @@ const elements = {
   actionLimit: $('#action-limit'),
   // Chrome
   launchChrome: $('#launch-chrome'),
+  // 番茄发布
+  fanqieBook: $('#fanqie-book'),
+  fanqieLocalState: $('#fanqie-local-state'),
+  fanqieRefreshLocal: $('#fanqie-refresh-local'),
+  fanqieLaunchChrome: $('#fanqie-launch-chrome'),
+  fanqieLocalOutput: $('#fanqie-local-output'),
+  fanqieRemoteState: $('#fanqie-remote-state'),
+  fanqieActionState: $('#fanqie-action-state'),
+  fanqieFrom: $('#fanqie-from'),
+  fanqieTo: $('#fanqie-to'),
+  fanqieConfirmation: $('#fanqie-confirmation'),
+  fanqieRemoteStatus: $('#fanqie-remote-status'),
+  fanqieUploadPreview: $('#fanqie-upload-preview'),
+  fanqieReconcilePreview: $('#fanqie-reconcile-preview'),
+  fanqieReconcileApply: $('#fanqie-reconcile-apply'),
+  fanqieUploadApply: $('#fanqie-upload-apply'),
+  fanqieRemoteOutput: $('#fanqie-remote-output'),
   // Reconcile
   reconcileState: $('#reconcile-state'),
   reconcilePreview: $('#reconcile-preview'),
@@ -70,6 +87,7 @@ const elements = {
 
 let statusLoading = false;
 let operationBusy = false;
+let fanqieBusy = false;
 let toastTimer = null;
 
 async function api(path, options = {}) {
@@ -206,8 +224,9 @@ function setupTabs() {
         panel.classList.toggle('tab-panel-active', active);
         panel.hidden = !active;
       });
-      // 切到 books 或 config 时自动加载
+      // 切到功能页时按需加载；番茄只读取本地状态，不自动访问远端。
       if (target === 'books' && !elements.booksList.dataset.loaded) refreshBooks({ quiet: true });
+      if (target === 'fanqie' && !elements.fanqieBook.dataset.loaded) refreshFanqieLocal({ quiet: true });
       if (target === 'config' && !elements.configEditor.dataset.loaded) loadConfig().catch(() => {});
     });
   });
@@ -279,6 +298,110 @@ async function launchChrome() {
     showToast(error.message, 'error');
   } finally {
     elements.launchChrome.disabled = false;
+  }
+}
+
+// ============ 番茄发布 ============
+function selectedFanqieBook() {
+  return elements.fanqieBook.value || '';
+}
+
+function setFanqieBusy(value, message = '等待操作') {
+  fanqieBusy = value;
+  for (const button of [
+    elements.fanqieRefreshLocal, elements.fanqieLaunchChrome, elements.fanqieRemoteStatus,
+    elements.fanqieUploadPreview, elements.fanqieReconcilePreview,
+    elements.fanqieReconcileApply, elements.fanqieUploadApply,
+  ]) button.disabled = value;
+  elements.fanqieActionState.textContent = message;
+}
+
+async function refreshFanqieLocal({ quiet = false } = {}) {
+  if (fanqieBusy) return;
+  elements.fanqieRefreshLocal.disabled = true;
+  try {
+    const data = await api('/api/fanqie/local-status');
+    const previous = selectedFanqieBook();
+    elements.fanqieBook.replaceChildren();
+    for (const item of data.books || []) {
+      const option = document.createElement('option');
+      option.value = item.book;
+      option.textContent = item.error ? `${item.book}（配置错误）` : item.book;
+      elements.fanqieBook.append(option);
+    }
+    if (previous && [...elements.fanqieBook.options].some((option) => option.value === previous)) {
+      elements.fanqieBook.value = previous;
+    }
+    elements.fanqieBook.dataset.loaded = '1';
+    setPill(elements.fanqieLocalState, data.ok ? '本地检查通过' : '需要处理', data.ok ? 'success' : 'danger');
+    elements.fanqieLocalOutput.textContent = JSON.stringify(data, null, 2);
+    if (!quiet) showToast(data.ok ? '番茄本地配置检查通过。' : '番茄本地配置存在问题。', data.ok ? 'success' : 'warning');
+  } catch (error) {
+    setPill(elements.fanqieLocalState, '读取失败', 'danger');
+    elements.fanqieLocalOutput.textContent = `失败：${error.message}`;
+    if (!quiet) showToast(error.message, 'error');
+  } finally {
+    elements.fanqieRefreshLocal.disabled = false;
+  }
+}
+
+function fanqieRangeBody() {
+  const body = { book: selectedFanqieBook() };
+  if (!body.book) throw new Error('没有可用的番茄书籍绑定。');
+  for (const [name, element] of [['from', elements.fanqieFrom], ['to', elements.fanqieTo]]) {
+    if (!element.value) continue;
+    const value = Number(element.value);
+    if (!Number.isInteger(value) || value < 1) throw new Error(`${name} 必须是正整数。`);
+    body[name] = value;
+  }
+  return body;
+}
+
+async function launchFanqieChrome() {
+  if (fanqieBusy) return;
+  let body;
+  try { body = fanqieRangeBody(); } catch (error) { showToast(error.message, 'warning'); return; }
+  setFanqieBusy(true, '正在启动专用 Chrome…');
+  try {
+    const result = await api('/api/fanqie/chrome', { method: 'POST', body: JSON.stringify({ book: body.book }) });
+    showToast(result.message || '番茄 Chrome 启动命令已发出。', 'success');
+  } catch (error) { showToast(error.message, 'error'); }
+  finally { setFanqieBusy(false); }
+}
+
+async function runFanqieCommand(command, apply = false) {
+  if (fanqieBusy) return;
+  let body;
+  try { body = fanqieRangeBody(); } catch (error) { showToast(error.message, 'warning'); return; }
+  body.apply = apply;
+  if (apply) {
+    body.confirmation = elements.fanqieConfirmation.value;
+    const expected = command === 'upload' ? `PUBLISH ${body.book}` : `RECONCILE ${body.book}`;
+    if (body.confirmation !== expected) {
+      showToast(`请输入准确确认文字：${expected}`, 'warning');
+      return;
+    }
+    const question = command === 'upload'
+      ? `最后确认：现在正式向番茄提交“${body.book}”的待发布章节吗？`
+      : `确认根据番茄远端列表回填“${body.book}”的本地发布状态吗？`;
+    if (!window.confirm(question)) return;
+  }
+  const endpoint = command === 'status' ? 'remote-status' : command;
+  setFanqieBusy(true, apply ? '正在执行受保护写操作…' : '正在进行只读远端检查…');
+  elements.fanqieRemoteState.textContent = '执行中…';
+  elements.fanqieRemoteOutput.textContent = '正在连接绑定的番茄账号，请稍候……';
+  try {
+    const result = await api(`/api/fanqie/${endpoint}`, { method: 'POST', body: JSON.stringify(body) });
+    elements.fanqieRemoteOutput.textContent = JSON.stringify(result, null, 2);
+    elements.fanqieRemoteState.textContent = result.ok ? '检查通过' : '需要处理';
+    showToast(result.ok ? '番茄操作完成。' : '番茄检查发现需要处理的问题。', result.ok ? 'success' : 'warning');
+  } catch (error) {
+    elements.fanqieRemoteOutput.textContent = JSON.stringify(error.payload || { error: error.message }, null, 2);
+    elements.fanqieRemoteState.textContent = '失败';
+    showToast(error.message, 'error');
+  } finally {
+    setFanqieBusy(false);
+    await refreshFanqieLocal({ quiet: true });
   }
 }
 
@@ -624,6 +747,13 @@ function setupEventListeners() {
   elements.logStage.addEventListener('change', () => refreshLogs());
 
   elements.launchChrome.addEventListener('click', launchChrome);
+  elements.fanqieRefreshLocal.addEventListener('click', () => refreshFanqieLocal());
+  elements.fanqieLaunchChrome.addEventListener('click', launchFanqieChrome);
+  elements.fanqieRemoteStatus.addEventListener('click', () => runFanqieCommand('status'));
+  elements.fanqieUploadPreview.addEventListener('click', () => runFanqieCommand('upload'));
+  elements.fanqieReconcilePreview.addEventListener('click', () => runFanqieCommand('reconcile'));
+  elements.fanqieReconcileApply.addEventListener('click', () => runFanqieCommand('reconcile', true));
+  elements.fanqieUploadApply.addEventListener('click', () => runFanqieCommand('upload', true));
   elements.reconcilePreview.addEventListener('click', () => runReconcile(false));
   elements.reconcileApply.addEventListener('click', () => runReconcile(true));
   elements.generateProgress.addEventListener('click', runGenerateProgress);

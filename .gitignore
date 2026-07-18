@@ -13,6 +13,10 @@ node_modules/
 .env
 .env.*
 
+# 本机番茄账号登录态映射（真实 Profile 路径不入库）
+config/local/*.json
+!config/local/.gitkeep
+
 *.tmp
 *.bak
 

@@ -851,6 +851,32 @@ noscript {
   font: inherit;
 }
 
+.form-row select,
+.form-row input[type="number"] {
+  min-height: 38px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  background: white;
+  font: inherit;
+}
+
+.inline-fields {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-fields input {
+  width: 120px;
+}
+
+.fanqie-danger-zone {
+  margin-top: 16px;
+  border-color: #efb2b2;
+}
+
 .form-row input[type="text"]:focus-visible {
   border-color: var(--primary);
   outline: 3px solid rgba(49, 87, 213, 0.2);

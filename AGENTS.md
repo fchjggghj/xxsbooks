@@ -25,6 +25,18 @@ Prior volume context injection (`priorVolumeContext` in config-xie, only effecti
 - After any start, resume, stop, or applied reconcile action, rerun `node control.mjs status --json` and report the concrete result.
 - Do not launch Chrome or a real queue for documentation, status, or validation work.
 
+## Fanqie publishing contract
+
+- Each Fanqie account/work binding belongs in that book's `config/books/*.json` under `fanqie`; never infer an account from an open browser tab.
+- Start only the bound dedicated Chrome profile with `npm run fanqie:chrome`; never kill Chrome processes or reuse the ChatGPT CDP profile.
+- Before publishing, run `npm run fanqie:status`. `fanqie:upload` is preview-only unless the user explicitly requests publishing and `--apply` is supplied.
+- Publishing is strictly ordered and fail-stop. Compare every existing remote chapter title with the corresponding local title; never skip a missing chapter, overwrite a mismatched work, or continue after an uncertain submission.
+- `aiUsed` must be an explicit boolean in the binding. Do not guess or silently change the AI disclosure or schedule.
+- Respect `书籍/.state/fanqie/.publish.lock.json`; inspect ownership before handling an existing lock and never delete it blindly.
+- Treat `config/local/fanqie-accounts.json` as machine-private. Commit only `accountRef` and portable work/schedule settings in book configs.
+- A publish apply requires a passing quality/schedule preflight and durable chapter phases. On uncertain submission, capture evidence and stop; use preview reconcile before any state repair.
+- The local UI must never poll Fanqie remotely or publish automatically. Remote access is user-triggered; apply requires typed confirmation plus a second confirmation dialog.
+
 ## Validation
 
 Use these non-starting checks:

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "accounts": {
+    "example-account": {
+      "label": "番茄账号示例",
+      "shortcutPath": "C:\\path\\to\\account.lnk",
+      "profileDir": "C:\\path\\to\\chrome-profile",
+      "profileName": "Default",
+      "cdpPort": 9333
+    }
+  }
+}

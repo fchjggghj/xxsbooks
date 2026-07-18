@@ -11,12 +11,14 @@ const HOST = '127.0.0.1';
 const DEFAULT_PORT = 3210;
 const MAX_JSON_BODY_BYTES = 64 * 1024;
 const MAX_LOG_BYTES = 200 * 1024;
-const projectRoot = path.dirname(fileURLToPath(import.meta.url));
-const controlFile = path.join(projectRoot, 'control.mjs');
-const importScript = path.join(projectRoot, 'import-newbooks.mjs');
-const previewScript = path.join(projectRoot, 'preview-volumes.mjs');
-const startChromeScript = path.join(projectRoot, 'start-chrome.ps1');
-const uiRoot = path.join(projectRoot, 'ui');
+const appRoot = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(process.env.XXSBOOKS_PROJECT_ROOT || appRoot);
+const controlFile = path.join(appRoot, 'control.mjs');
+const fanqieControlFile = path.join(appRoot, 'fanqie-control.mjs');
+const importScript = path.join(appRoot, 'import-newbooks.mjs');
+const previewScript = path.join(appRoot, 'preview-volumes.mjs');
+const startChromeScript = path.join(appRoot, 'start-chrome.ps1');
+const uiRoot = path.join(appRoot, 'ui');
 const configFiles = { chai: 'config-chai.json', xie: 'config-xie.json' };
 
 const staticFiles = new Map([
@@ -485,6 +487,53 @@ async function handleChrome(req, res) {
   sendJson(res, 200, { ok: true, message: 'Chrome 启动命令已发出，请稍候查看 CDP 状态。', pid: child.pid });
 }
 
+async function fanqieLocalStatus(book = '') {
+  const args = ['local-status'];
+  if (book) args.push('--book', book);
+  return runNodeScript(fanqieControlFile, args, 30_000, { expectJson: true });
+}
+
+async function handleFanqieChrome(req, res) {
+  if (!isSameOriginWrite(req, handleFanqieChrome.port)) throw new HttpError(403, '拒绝非同源写请求。');
+  const body = await readJsonBody(req);
+  const book = String(body.book || '').trim();
+  if (!book) throw new HttpError(400, '请指定已绑定番茄的书名。');
+  const child = spawn(process.execPath, [fanqieControlFile, 'chrome', '--book', book], {
+    cwd: projectRoot, windowsHide: true, detached: true, stdio: 'ignore',
+  });
+  child.unref();
+  sendJson(res, 200, { ok: true, message: '番茄专用 Chrome 启动命令已发出。', pid: child.pid });
+}
+
+async function handleFanqieCommand(req, res, command) {
+  if (!isSameOriginWrite(req, handleFanqieCommand.port)) throw new HttpError(403, '拒绝非同源写请求。');
+  const body = await readJsonBody(req);
+  const book = String(body.book || '').trim();
+  if (!book) throw new HttpError(400, '请指定已绑定番茄的书名。');
+  const apply = body.apply === true;
+  if (command === 'status' && apply) throw new HttpError(400, '远端状态检查不接受 apply。');
+  if (apply) {
+    const expected = command === 'upload' ? `PUBLISH ${book}` : `RECONCILE ${book}`;
+    if (body.confirmation !== expected) throw new HttpError(400, `二次确认文字不匹配，应为：${expected}`);
+  }
+  const args = [command, '--book', book];
+  for (const name of ['from', 'to']) {
+    if (body[name] == null || body[name] === '') continue;
+    const value = Number(body[name]);
+    if (!Number.isInteger(value) || value < 1) throw new HttpError(400, `${name} 必须是正整数。`);
+    args.push(`--${name}`, String(value));
+  }
+  if (apply) args.push('--apply');
+  acquireWriteLock();
+  try {
+    const timeout = command === 'upload' && apply ? 4 * 60 * 60 * 1000 : 180_000;
+    const result = await runNodeScript(fanqieControlFile, args, timeout, { expectJson: true });
+    sendJson(res, 200, result);
+  } finally {
+    releaseWriteLock();
+  }
+}
+
 // 列出 书籍/ 下的书和卷结构（只读）
 async function listBooks() {
   const chaiCfg = JSON.parse((await fs.readFile(path.join(projectRoot, configFiles.chai), 'utf8')).replace(/^\uFEFF/, ''));
@@ -642,6 +691,8 @@ function createServer(port) {
   handleImport.port = port;
   handlePreviewVolumes.port = port;
   handleChrome.port = port;
+  handleFanqieChrome.port = port;
+  handleFanqieCommand.port = port;
   saveConfig.port = port;
 
   return http.createServer(async (req, res) => {
@@ -669,6 +720,10 @@ function createServer(port) {
       }
       if (method === 'GET' && pathname === '/api/books') {
         sendJson(res, 200, await listBooks());
+        return;
+      }
+      if (method === 'GET' && pathname === '/api/fanqie/local-status') {
+        sendJson(res, 200, await fanqieLocalStatus(url.searchParams.get('book') || ''));
         return;
       }
       if (method === 'GET' && pathname === '/api/config') {
@@ -708,6 +763,22 @@ function createServer(port) {
       }
       if (method === 'POST' && pathname === '/api/chrome') {
         await handleChrome(req, res);
+        return;
+      }
+      if (method === 'POST' && pathname === '/api/fanqie/chrome') {
+        await handleFanqieChrome(req, res);
+        return;
+      }
+      if (method === 'POST' && pathname === '/api/fanqie/remote-status') {
+        await handleFanqieCommand(req, res, 'status');
+        return;
+      }
+      if (method === 'POST' && pathname === '/api/fanqie/upload') {
+        await handleFanqieCommand(req, res, 'upload');
+        return;
+      }
+      if (method === 'POST' && pathname === '/api/fanqie/reconcile') {
+        await handleFanqieCommand(req, res, 'reconcile');
         return;
       }
       if (method === 'POST' && pathname === '/api/config') {
