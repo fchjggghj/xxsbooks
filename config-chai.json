@@ -20,16 +20,8 @@
     "start": 1,
     "end": 60
   },
-  "skipNovelKeys": [
-    "反派只想学习［快穿］",
-    "快穿_偏执反派在我怀里奶唧唧"
-  ],
-  "restartNovelKeys": [
-    "快穿：系统和宿主一起黑化了"
-  ],
-  "freshConversationNovelKeys": [
-    "快穿：系统和宿主一起黑化了"
-  ],
+  "bookConfigDir": "config/books",
+  "bookCatalogMode": "explicit",
   "conversationScope": "novel",
   "retryMode": "edit-and-resend",
   "maxRetries": 1,

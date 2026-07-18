@@ -1,5 +1,16 @@
 # GPTS 小说两阶段队列工具
 
+> 当前版本采用“阶段配置 + 单书配置 + 单章任务 + 会话归属注册”的隔离结构。完整边界和操作方式见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+常用的单书命令：
+
+```powershell
+node control.mjs start chai --book "书名"
+node control.mjs start xie --book "书名"
+```
+
+写正文时，章节标题固定取同章 `原文` 文件首行；提示词和落盘阶段都会校验，GPT不能自行改题。
+
 这是一个本地批量队列工具，用 Chrome 自动化把小说章节发送给 ChatGPT GPTS，并把回复保存到本地文件。
 
 当前项目按「书」组织，每本书自包含三个子目录，两阶段流程在书内部流转：

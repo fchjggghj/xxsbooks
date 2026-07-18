@@ -9,6 +9,15 @@ import { taskStateKey, mergeStateTasks, firstRunnableTask } from './lib/queue-st
 import { classifyQueueError, safeAppendJsonlLog } from './lib/structured-log.mjs';
 import { collectPriorVolumeContext } from './lib/prior-context.mjs';
 import { normalizeAssistantText } from './lib/assistant-text.mjs';
+import { replaceReplyTitle, resolveOriginalTitle } from './lib/chapter-title.mjs';
+import { loadBookCatalog, settingsForBook } from './lib/book-catalog.mjs';
+import { filterFilesByChapterRange, matchesBookFilter } from './lib/task-scope.mjs';
+import {
+  canonicalConversationUrl,
+  claimConversation,
+  isConversationUrl,
+  releaseNovelConversation,
+} from './lib/conversation-registry.mjs';
 
 let queueLockHandle = null;
 let queuePage = null;
@@ -216,6 +225,7 @@ function parseArgs(argv) {
     force: false,
     limit: 0,
     perNovelLimit: 0,
+    bookFilters: [],
     resetState: false,
   };
 
@@ -230,6 +240,11 @@ function parseArgs(argv) {
       const value = Number(argv[++i] || 0);
       if (!Number.isInteger(value) || value < 0) throw new Error('--per-novel-limit must be a non-negative integer.');
       out.perNovelLimit = value;
+    }
+    else if (arg === '--book') {
+      const value = String(argv[++i] || '').trim();
+      if (!value) throw new Error('--book requires a book name.');
+      out.bookFilters.push(value);
     }
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -261,6 +276,8 @@ async function loadConfig(configPath, projectRoot) {
   cfg.stage = cfg.configName.includes('chai') ? 'chai' : cfg.configName.includes('xie') ? 'xie' : cfg.configName;
   cfg.inputDir = resolveFromRoot(projectRoot, cfg.inputDir);
   cfg.outputDir = resolveFromRoot(projectRoot, cfg.outputDir);
+  cfg.bookConfigDir = cfg.bookConfigDir ? resolveFromRoot(projectRoot, cfg.bookConfigDir) : '';
+  cfg.bookCatalogMode = String(cfg.bookCatalogMode || 'discover');
   cfg.fileExtensions = (cfg.fileExtensions || ['.txt', '.md']).map((x) =>
     String(x).toLowerCase(),
   );
@@ -328,6 +345,12 @@ function validateConfig(cfg, dryRun) {
   }
   if (cfg.conversationScope !== 'novel') {
     errors.push('conversationScope must be "novel"');
+  }
+  if (!['discover', 'explicit'].includes(cfg.bookCatalogMode)) {
+    errors.push('bookCatalogMode must be "discover" or "explicit"');
+  }
+  if (cfg.bookCatalogMode === 'explicit' && !cfg.bookConfigDir) {
+    errors.push('bookConfigDir is required when bookCatalogMode is "explicit"');
   }
   if (cfg.chaptersPerPrompt !== 1) {
     errors.push('chaptersPerPrompt must be 1; chai and xie always process one chapter per task');
@@ -592,12 +615,6 @@ async function scanBookSource(cfg) {
   return files;
 }
 
-function chapterIndexFromFile(filePath) {
-  const base = path.basename(filePath, path.extname(filePath));
-  const m = base.match(/^(\d+)$/);
-  return m ? Number(m[1]) : null;
-}
-
 async function buildTasks(cfg, opts) {
   // 普通 dry-run 必须零写入，目录只在真实运行时创建。
   if (!opts.dryRun) {
@@ -606,6 +623,7 @@ async function buildTasks(cfg, opts) {
   }
 
   const files = await scanBookSource(cfg);
+  const catalog = await loadBookCatalog(cfg);
   const novels = new Map();
   for (const file of files) {
     // scanBookSource 已附带 novelKey/volumeKey，直接用；否则用 fileNovelInfo 推断
@@ -618,14 +636,11 @@ async function buildTasks(cfg, opts) {
 
   const tasks = [];
   for (const novel of novels.values()) {
+    if (!matchesBookFilter(opts.bookFilters, novel)) continue;
+    const bookSettings = settingsForBook(catalog, novel.novelName, cfg.stage, cfg.chapterRange);
+    if (!bookSettings.enabled) continue;
     if (cfg.skipNovelKeys.includes(novel.novelKey)) continue;
-    if (cfg.chapterRange) {
-      const { start, end } = cfg.chapterRange;
-      novel.files = novel.files.filter((f) => {
-        const idx = chapterIndexFromFile(f.inputPath);
-        return idx !== null && idx >= start && idx <= end;
-      });
-    }
+    novel.files = filterFilesByChapterRange(novel.files, bookSettings.chapterRange);
     for (let i = 0; i < novel.files.length; i++) {
       const group = [novel.files[i]];
       const localId = taskIdFor(i, group);
@@ -642,6 +657,7 @@ async function buildTasks(cfg, opts) {
         outputPath: '',
       };
       task.outputPath = outputPathForTask(cfg, task);
+      task.originalTitle = await resolveOriginalTitle(cfg, task);
       tasks.push(task);
     }
   }
@@ -664,12 +680,13 @@ async function loadState(cfg, opts) {
 
   if (!fssync.existsSync(cfg.stateFile)) {
     return {
-      version: 3,
+      version: 4,
       configName: cfg.configName,
       currentTaskId: null,
       currentNovelKey: null,
       currentConversationUrl: '',
       novelConversations: {},
+      conversationOwners: {},
       tasks: {},
       createdAt: nowIso(),
       updatedAt: nowIso(),
@@ -677,12 +694,20 @@ async function loadState(cfg, opts) {
   }
 
   const state = await readJson(cfg.stateFile);
-  state.version = 3;
+  state.version = 4;
   state.configName = state.configName || cfg.configName;
   state.currentTaskId = state.currentTaskId || null;
   state.currentNovelKey = state.currentNovelKey || null;
   state.currentConversationUrl = state.currentConversationUrl || '';
   state.novelConversations = state.novelConversations || {};
+  state.conversationOwners = state.conversationOwners || {};
+  for (const [novelKey, conversationUrl] of Object.entries(state.novelConversations)) {
+    if (!isConversationUrl(conversationUrl)) {
+      delete state.novelConversations[novelKey];
+      continue;
+    }
+    claimConversation(state, conversationUrl, { stage: cfg.stage, novelKey });
+  }
   state.tasks = state.tasks || {};
   delete state.conversationPromptCount;
   return state;
@@ -810,11 +835,6 @@ async function openExistingConversation(page, url) {
   await firstComposer(page, 90000);
 }
 
-function canonicalConversationUrl(value) {
-  const url = new URL(value);
-  return `${url.origin}${url.pathname}`.replace(/\/$/, '');
-}
-
 function assertExpectedConversation(page, expectedUrl, novelKey) {
   const actual = canonicalConversationUrl(page.url());
   const expected = canonicalConversationUrl(expectedUrl);
@@ -829,15 +849,16 @@ function assertExpectedConversation(page, expectedUrl, novelKey) {
 async function ensureNovelConversation(page, cfg, state, task, taskState, useFailedConversation) {
   const failedConversationUrl = useFailedConversation ? taskState.conversationUrl : '';
   const savedNovelUrl = state.novelConversations[task.novelKey] || '';
-  const targetUrl = failedConversationUrl || savedNovelUrl;
+  const targetUrl = [failedConversationUrl, savedNovelUrl].find(isConversationUrl) || '';
 
   if (!targetUrl) {
     await openNewConversation(page, cfg);
     state.currentConversationUrl = page.url();
     state.currentNovelKey = task.novelKey;
-    state.novelConversations[task.novelKey] = page.url();
     return;
   }
+
+  claimConversation(state, targetUrl, { stage: cfg.stage, novelKey: task.novelKey });
 
   if (page.url() !== targetUrl) {
     await openExistingConversation(page, targetUrl);
@@ -1145,6 +1166,7 @@ function renderPrompt(template, task, content, priorVolumes = '') {
     .replaceAll('{{chapterCount}}', String(task.inputFiles.length))
     .replaceAll('{{filename}}', path.basename(task.inputFiles[0].inputPath))
     .replaceAll('{{relativePath}}', task.inputFiles[0].relativePath)
+    .replaceAll('{{originalTitle}}', task.originalTitle || '')
     .replaceAll('{{filenames}}', task.inputFiles.map((x) => path.basename(x.inputPath)).join('\n'))
     .replaceAll('{{relativePaths}}', task.inputFiles.map((x) => x.relativePath).join('\n'));
 }
@@ -1175,6 +1197,7 @@ async function persistSubmittedTask(page, cfg, state, task, taskState, method) {
     );
   }
   const conversationUrl = page.url();
+  claimConversation(state, conversationUrl, { stage: cfg.stage, novelKey: task.novelKey });
   taskState.sent = true;
   taskState.conversationUrl = conversationUrl;
   taskState.updatedAt = nowIso();
@@ -1308,9 +1331,12 @@ async function processTask(page, cfg, state, task, taskState) {
       const reply = await sendOrEdit(page, cfg, task, prompt, method, async () => {
         await persistSubmittedTask(page, cfg, state, task, taskState, method);
       });
+      const finalReply = task.originalTitle
+        ? replaceReplyTitle(reply, task.originalTitle)
+        : `${reply.trim()}\n`;
 
       // 只保存回复内容；元信息（对话地址/时间/重试/恢复过程）已在 taskState 里，持久化到 state.json
-      await atomicWrite(task.outputPath, reply.trim() + '\n');
+      await atomicWrite(task.outputPath, finalReply);
       await fs.rm(`${task.outputPath}.error.txt`, { force: true });
 
       state.currentConversationUrl = page.url();
@@ -1329,12 +1355,12 @@ async function processTask(page, cfg, state, task, taskState) {
       await logEvent(cfg, 'task_done', taskLogFields(task, {
         method,
         durationMs: Date.now() - attemptStartedAt,
-        replyChars: reply.length,
+        replyChars: finalReply.length,
         promptChars: prompt.length,
         priorContextChars: priorVolumes.charCount,
         conversationUrl: page.url(),
       }));
-      return reply.length;
+      return finalReply.length;
     } catch (error) {
       const failed = await markTaskFailed(page, cfg, state, task, taskState, error, 'attempt', {
         method,
@@ -1492,7 +1518,7 @@ async function main() {
       cfg.freshConversationNovelKeys.filter((key) => !state.freshConversationNovelKeys[key]),
     );
     for (const key of freshConversationNovelKeys) {
-      delete state.novelConversations[key];
+      releaseNovelConversation(state, cfg.stage, key);
       if (state.currentNovelKey === key) {
         state.currentTaskId = null;
         state.currentNovelKey = null;
@@ -1509,6 +1535,7 @@ async function main() {
       exists: fssync.existsSync,
       now: nowIso,
       restartNovelKeys,
+      preserveExisting: opts.bookFilters.length > 0,
     });
     preserveCompletedInputs(state, tasks, priorCompletedFiles);
     for (const key of restartNovelKeys) state.restartedNovelKeys[key] = nowIso();

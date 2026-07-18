@@ -28,8 +28,11 @@
     "xie:dry": "node gpts-queue.mjs --config config-xie.json --dry-run",
     "xie:force": "node gpts-queue.mjs --config config-xie.json --force",
     "xie:reset": "node gpts-queue.mjs --config config-xie.json --reset-state --dry-run",
-    "check": "node --check gpts-queue.mjs && node --check queue-lock.mjs && node --check control.mjs && node --check lib/queue-state.mjs && node --check lib/assistant-text.mjs",
-    "test": "node --test test/queue-state.test.mjs test/assistant-text.test.mjs"
+    "titles:preview": "node scripts/restore-original-titles.mjs .",
+    "titles:apply": "node scripts/restore-original-titles.mjs . --apply",
+    "book:config": "node scripts/create-book-config.mjs",
+    "check": "node --check gpts-queue.mjs && node --check queue-lock.mjs && node --check control.mjs && node --check lib/queue-state.mjs && node --check lib/assistant-text.mjs && node --check lib/chapter-title.mjs && node --check lib/book-catalog.mjs && node --check lib/task-scope.mjs && node --check lib/conversation-registry.mjs && node --check scripts/restore-original-titles.mjs && node --check scripts/create-book-config.mjs",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.49.0"

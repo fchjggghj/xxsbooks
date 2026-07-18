@@ -6,6 +6,10 @@ Volume mode is optional (`volumeMode` in config, default false). When enabled, a
 
 Each book (or volume, when volume mode is on) keeps its own ChatGPT conversation URL per stage (recorded in `state.novelConversations["书名"]` or `state.novelConversations["书名/卷名"]`); chapters of the same book/volume reuse one conversation, different books/volumes never cross addresses.
 
+Book enrollment is explicit. Every active book must have one independent `config/books/*.json` file. Unconfigured folders under `书籍/` are ignored by queue building and preflight so a newly copied book cannot interfere with an existing run. Prefer `node control.mjs start <stage> --book "书名"` for book-scoped work; scoped state merges must preserve tasks and conversations belonging to all unselected books.
+
+For xie, the chapter title is immutable: read it from the first non-empty line of the matching `原文/NNNN.txt` or `.md`, inject it into the prompt as `{{originalTitle}}`, and enforce it again before writing the reply. Never replace an original title with a generated summary title.
+
 Prior volume context injection (`priorVolumeContext` in config-xie, only effective with `volumeMode: true`): when xie processes a volume, it reads all prior volumes' `拆分/` files as background context, injected via `{{priorVolumes}}` placeholder in the prompt template.
 
 ## Control contract
@@ -17,6 +21,7 @@ Prior volume context injection (`priorVolumeContext` in config-xie, only effecti
 - Never run `force`, reset state, or `reconcile --apply` unless the user explicitly authorizes that write operation. Never auto-reset after failure.
 - Never delete a lock blindly. If status is inconsistent, inspect live Node command lines and saved ownership before deciding.
 - Preserve one independent ChatGPT conversation per book (or per volume in volume mode), strict chapter order, and failure-stop semantics.
+- Only persist concrete `https://chatgpt.com/c/...` conversation URLs. Never save a GPT introduction URL as a book conversation, and never allow two books in the same stage to claim the same conversation URL.
 - After any start, resume, stop, or applied reconcile action, rerun `node control.mjs status --json` and report the concrete result.
 - Do not launch Chrome or a real queue for documentation, status, or validation work.
 

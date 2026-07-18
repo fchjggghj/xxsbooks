@@ -15,12 +15,20 @@
   "skipExisting": true,
   "outputExtension": ".md",
   "maxPromptChars": 120000,
-  "promptTemplate": "【严格按照提示词执行，注意上下文】\n\n{{content}}",
+  "promptTemplate": "【严格按照提示词执行，注意上下文】\n【本章标题必须原样使用：{{originalTitle}}，不得改写、概括或添加副标题】\n\n{{content}}",
+  "titlePolicy": {
+    "mode": "source-first-line",
+    "sourceSubdir": "原文",
+    "extensions": [".txt", ".md"],
+    "required": true
+  },
   "chaptersPerPrompt": 1,
   "chapterRange": {
     "start": 1,
     "end": 60
   },
+  "bookConfigDir": "config/books",
+  "bookCatalogMode": "explicit",
   "conversationScope": "novel",
   "retryMode": "edit-and-resend",
   "maxRetries": 1,

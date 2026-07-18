@@ -14,6 +14,7 @@ import {
 import { inspectChatGptSession } from './lib/chatgpt-session.mjs';
 import { extractFileOrder, sortVolumeNames } from './lib/naming.mjs';
 import { assertSafePathSegment, resolveInside } from './lib/path-safety.mjs';
+import { loadBookCatalog, settingsForBook } from './lib/book-catalog.mjs';
 
 const projectRoot = path.resolve(
   process.env.XXSBOOKS_PROJECT_ROOT || path.dirname(fileURLToPath(import.meta.url)),
@@ -28,8 +29,8 @@ function usage() {
 
 Usage:
   node control.mjs status [chai|xie|all] [--json]
-  node control.mjs start <chai|xie> [--limit N] [--per-novel-limit N] [--force] [--json]
-  node control.mjs resume <chai|xie> [--limit N] [--per-novel-limit N] [--json]
+  node control.mjs start <chai|xie> [--book 书名] [--limit N] [--per-novel-limit N] [--force] [--json]
+  node control.mjs resume <chai|xie> [--book 书名] [--limit N] [--per-novel-limit N] [--json]
   node control.mjs stop [--json]
   node control.mjs reconcile <chai|xie|all> [--apply] [--json]
   node control.mjs preflight [--json]
@@ -39,6 +40,7 @@ Usage:
 status and reconcile without --apply are read-only. start/resume run in the background.
 --limit N: 本次运行最多处理 N 个 pending 任务（全局顺序截断）。
 --per-novel-limit N: 每个 novelKey 本次最多处理 N 个 pending 任务（跨书轮询，可让多本书各处理前 N 章）。
+--book 书名: 仅处理指定书；可重复传入，未选中的书籍状态保持不变。
 preflight: 跑前预检（Chrome/CDP/登录态/输入文件齐全/编号连续）。
 progress: 显式生成每本书的进度.md（写操作）。
 normalize: 预览补零重命名；只有 --apply 才写入。`;
@@ -46,7 +48,7 @@ normalize: 预览补零重命名；只有 --apply 才写入。`;
 
 function parseArgs(argv) {
   const positional = [];
-  const options = { json: false, apply: false, force: false, limit: null, perNovelLimit: null };
+  const options = { json: false, apply: false, force: false, limit: null, perNovelLimit: null, books: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--json') options.json = true;
@@ -60,6 +62,10 @@ function parseArgs(argv) {
       const value = Number(argv[++i]);
       if (!Number.isInteger(value) || value < 0) throw new Error('--per-novel-limit must be a non-negative integer.');
       options.perNovelLimit = value;
+    } else if (arg === '--book') {
+      const value = String(argv[++i] || '').trim();
+      if (!value) throw new Error('--book requires a book name.');
+      options.books.push(value);
     } else if (arg === '--help' || arg === '-h') options.help = true;
     else if (arg.startsWith('--')) throw new Error(`Unknown option: ${arg}`);
     else positional.push(arg);
@@ -264,13 +270,14 @@ async function launch(command, stage, options) {
   await fs.mkdir(path.dirname(logPath), { recursive: true });
   await fs.appendFile(
     logPath,
-    `\n${new Date().toISOString()} CONTROL ${command} stage=${stage} limit=${options.limit || ''} perNovelLimit=${options.perNovelLimit ?? ''} force=${options.force}\n`,
+    `\n${new Date().toISOString()} CONTROL ${command} stage=${stage} books=${options.books.join('|')} limit=${options.limit || ''} perNovelLimit=${options.perNovelLimit ?? ''} force=${options.force}\n`,
     'utf8',
   );
   const logFd = fssync.openSync(logPath, 'a');
   const args = ['gpts-queue.mjs', '--config', STAGES[stage]];
   if (options.limit) args.push('--limit', String(options.limit));
   if (options.perNovelLimit != null) args.push('--per-novel-limit', String(options.perNovelLimit));
+  for (const book of options.books) args.push('--book', book);
   if (options.force) args.push('--force');
 
   const child = spawn(process.execPath, args, {
@@ -672,10 +679,16 @@ async function preflight() {
   const booksDir = resolveFromRoot(chaiCfg.inputDir || '书籍');
   const inputSubdir = chaiCfg.inputSubdir || '';
   const volumeMode = chaiCfg.volumeMode || false;
+  const catalog = await loadBookCatalog({
+    ...chaiCfg,
+    stage: 'chai',
+    bookConfigDir: chaiCfg.bookConfigDir ? resolveFromRoot(chaiCfg.bookConfigDir) : '',
+  });
   if (fssync.existsSync(booksDir)) {
     const entries = await fs.readdir(booksDir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      if (!settingsForBook(catalog, entry.name, 'chai', chaiCfg.chapterRange).enabled) continue;
       if (volumeMode) {
         // 卷模式：扫描 书名/卷名/原文/
         const bookDir = path.join(booksDir, entry.name);

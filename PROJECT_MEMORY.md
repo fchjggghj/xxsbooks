@@ -49,14 +49,14 @@ input/
 
 ## 状态文件
 
-运行时会在 `output` 里生成状态文件，不应提交：
+运行时状态文件位于书库根目录，不应提交：
 
 ```text
-output/01_chai/state.json
-output/02_xie/state.json
+书籍/.state/chai/state.json
+书籍/.state/xie/state.json
 ```
 
-当前状态版本是 `3`，核心字段是 `novelConversations`，用于记录“每本小说对应哪个 GPTS 对话 URL”。
+当前状态版本是 `4`。`novelConversations` 记录“每本小说对应哪个 GPTS 对话 URL”，`conversationOwners` 防止同阶段两本书认领同一地址。单书任务合并必须保留未选择书籍的状态。
 
 ## Chrome 登录状态
 
@@ -75,6 +75,12 @@ C:\chrome-automation
 - `start-chrome.ps1`：启动或复用带 CDP 的 Chrome。
 - `config-chai.json`：拆大纲阶段配置。
 - `config-xie.json`：正文阶段配置。
+- `config/books/*.json`：每本书的独立启用状态和阶段章节范围；未配置书籍不会进入队列。
+- `lib/task-scope.mjs`：单书选择和章节范围，不负责目录发现。
+- `lib/book-catalog.mjs`：书籍配置发现，不负责任务状态。
+- `lib/chapter-title.mjs`：从原文读取并强制保留章节原题。
+- `lib/conversation-registry.mjs`：会话地址归属校验。
+- `scripts/`：可预览、可审计的维护操作；默认不写入。
 - `README.md`：给使用者看的说明书。
 - `PROJECT_MEMORY.md`：给维护者和后续自动化助手看的项目记忆。
 

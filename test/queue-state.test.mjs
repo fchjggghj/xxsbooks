@@ -64,3 +64,19 @@ test('completed task with an existing output is skipped', () => {
 
   assert.equal(runnable, null);
 });
+
+test('book-scoped merge preserves tasks belonging to other books', () => {
+  const scoped = task('书A:0001', '书A');
+  const state = {
+    tasks: {
+      '书B:0001': { id: '书B:0001', novelKey: '书B', status: 'done' },
+    },
+  };
+  mergeStateTasks(cfg, state, [scoped], opts, {
+    exists: () => false,
+    now: () => 'now',
+    preserveExisting: true,
+  });
+  assert.equal(state.tasks['书B:0001'].status, 'done');
+  assert.equal(state.tasks['书A:0001'].status, 'pending');
+});
